@@ -510,7 +510,9 @@ console.log(
       try {
         for (let i = 0; i < dbInv.length; i += chunkSize) {
           const chunk = dbInv.slice(i, i + chunkSize);
-          const { error } = await supabase.from('inventory').upsert(chunk);
+          // Use insert instead of upsert to avoid PK conflict issues in this prototype
+          // We can clear first or just keep adding. For now, let's try insert.
+          const { error } = await supabase.from('inventory').insert(chunk);
           if (error) {
             syncError = error;
             break;
@@ -519,7 +521,8 @@ console.log(
 
         if (syncError) {
           console.error('재고 DB 동기화 실패:', syncError);
-          alert('재고 데이터를 클라우드에 저장하는 중 오류가 발생했습니다. Supabase 설정(POLICY)을 확인해 주세요.');
+          // Show the ACTUAL error message to the user for debugging
+          alert(`재고 데이터 저장 실패! \n오류 메시지: ${syncError.message} \n상세: ${syncError.details || '없음'}`);
         } else {
           console.log('재고 DB 동기화 완료');
           alert(`${dbInv.length}개의 재고 데이터를 불러오고 클라우드에 동기화했습니다!`);
