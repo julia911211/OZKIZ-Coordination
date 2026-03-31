@@ -121,6 +121,9 @@ async function fetchAllData() {
         '이미지URL': item.image_url,
         '옵션': item.product_option
       }));
+      console.log(`Inventory loaded: ${currentInventory.length} items`);
+    } else {
+      console.warn('Inventory table is empty or could not be loaded.');
     }
 
     if (custRes.data && custRes.data.length > 0) {
@@ -169,9 +172,18 @@ async function preloadDefaultData() {
 
 async function initApp() {
   await fetchAllData();
-  if (currentInventory.length === 0) await preloadDefaultData();
   
-  if (currentInventory.length === 0) currentInventory = mockInventory || [];
+  if (currentInventory.length === 0) {
+    await preloadDefaultData();
+    if (currentInventory.length === 0) currentInventory = mockInventory || [];
+  } else {
+    // Sync Success Alert (Only show once per session)
+    if (!sessionStorage.getItem('ozkids_sync_alert_shown')) {
+      alert(`클라우드 동기화 성공: ${currentInventory.length}개의 상품 정보를 불러왔습니다.`);
+      sessionStorage.setItem('ozkids_sync_alert_shown', 'true');
+    }
+  }
+
   if (currentCustomers.length === 0) currentCustomers = mockCustomers || [];
   if (Object.keys(currentHistoryMap).length === 0) currentHistoryMap = mockHistory || {};
 
