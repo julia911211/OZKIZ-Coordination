@@ -505,23 +505,31 @@ console.log(
         product_code: (item['공급처상품명'] || '').toString().trim()
       })).filter(row => row.name !== ''); // Ensure name is never empty
 
-        const chunkSize = 20; // Extreme chunking for maximum stability
-        let syncError = null;
+      // Pre-flight Connection Test
+      console.log('Testing connection to Supabase...');
+      const { error: testError } = await supabase.from('inventory').select('name').limit(1);
+      if (testError) {
+        alert(`클라우드 연결 테스트 실패! \n현재 네트워크에서 데이터 전송이 차단된 것 같습니다. \n오류: ${testError.message}`);
+        return;
+      }
 
-        try {
-          for (let i = 0; i < dbInv.length; i += chunkSize) {
-            const chunk = dbInv.slice(i, i + chunkSize);
-            console.log(`Syncing chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(dbInv.length/chunkSize)}...`);
-            
-            const { error, status, statusText } = await supabase.from('inventory').insert(chunk);
-            if (error) {
-              console.error(`Sync error at chunk ${i}: Status ${status} (${statusText})`, error);
-              syncError = error;
-              break;
-            }
-            // 500ms delay to prevent flood detection
-            await new Promise(resolve => setTimeout(resolve, 500));
+      const chunkSize = 5; // Extreme compatibility mode
+      let syncError = null;
+
+      try {
+        for (let i = 0; i < dbInv.length; i += chunkSize) {
+          const chunk = dbInv.slice(i, i + chunkSize);
+          console.log(`Syncing tiny chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(dbInv.length/chunkSize)}...`);
+          
+          const { error, status, statusText } = await supabase.from('inventory').insert(chunk);
+          if (error) {
+            console.error(`Sync error at tiny chunk ${i}: Status ${status} (${statusText})`, error);
+            syncError = error;
+            break;
           }
+          // 500ms delay to keep the connection "human-speed" for proxies
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
 
         if (syncError) {
           console.error('재고 DB 동기화 최종 실패:', syncError);
