@@ -492,42 +492,43 @@ console.log(
       currentInventory = mapped;
 
       // Supabase Sync (Chunked Upsert for large inventory)
+      // Supabase Sync (Chunked Insert with deep cleaning)
       const dbInv = currentInventory.map(item => ({
-        name: item['상품명'],
-        big_category: item['복종(대카테고리)'],
-        sub_category: item['복종'],
-        cost: item['원가'],
-        stock: item['가용재고'],
-        season: item['시즌'],
-        image_url: item['이미지URL'],
-        product_option: item['옵션'],
-        product_code: item['공급처상품명']
-      }));
+        name: (item['상품명'] || '').toString().trim(),
+        big_category: (item['복종(대카테고리)'] || '기타').toString().trim(),
+        sub_category: (item['복종'] || '기타').toString().trim(),
+        cost: parseInt(item['원가']) || 0,
+        stock: (item['가용재고'] || '0').toString().trim(),
+        season: (item['시즌'] || '사계절').toString().trim(),
+        image_url: (item['이미지URL'] || '').toString().trim(),
+        product_option: (item['옵션'] || '').toString().trim(),
+        product_code: (item['공급처상품명'] || '').toString().trim()
+      })).filter(row => row.name !== ''); // Ensure name is never empty
 
-        const chunkSize = 100; // Smaller chunks for better stability
+        const chunkSize = 20; // Extreme chunking for maximum stability
         let syncError = null;
 
         try {
           for (let i = 0; i < dbInv.length; i += chunkSize) {
             const chunk = dbInv.slice(i, i + chunkSize);
-            console.log(`Uploading chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(dbInv.length/chunkSize)}...`);
+            console.log(`Syncing chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(dbInv.length/chunkSize)}...`);
             
-            const { error } = await supabase.from('inventory').insert(chunk);
+            const { error, status, statusText } = await supabase.from('inventory').insert(chunk);
             if (error) {
+              console.error(`Sync error at chunk ${i}: Status ${status} (${statusText})`, error);
               syncError = error;
               break;
             }
-            // Add a small delay between chunks to prevent rate limiting or network congestion
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // 500ms delay to prevent flood detection
+            await new Promise(resolve => setTimeout(resolve, 500));
           }
 
         if (syncError) {
-          console.error('재고 DB 동기화 실패:', syncError);
-          // Show the ACTUAL error message to the user for debugging
-          alert(`재고 데이터 저장 실패! \n오류 메시지: ${syncError.message} \n상세: ${syncError.details || '없음'}`);
+          console.error('재고 DB 동기화 최종 실패:', syncError);
+          alert(`재고 데이터 저장 실패! \n오류 메시지: ${syncError.message} \n상세: ${syncError.details || '브라우저 보안 설정이나 광고 차단기 혹은 네트워크 환경(VPN/회사망)을 확인해 보세요.'}`);
         } else {
           console.log('재고 DB 동기화 완료');
-          alert(`${dbInv.length}개의 재고 데이터를 불러오고 클라우드에 동기화했습니다!`);
+          alert(`${dbInv.length}개의 재고 데이터를 성공적으로 클라우드에 동기화했습니다!`);
         }
       } catch (err) {
         console.error('Sync process error:', err);
