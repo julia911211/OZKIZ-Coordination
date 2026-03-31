@@ -513,27 +513,22 @@ console.log(
         return;
       }
 
-      const chunkSize = 5; // Extreme compatibility mode
+      const chunkSize = 200; 
       let syncError = null;
 
       try {
         for (let i = 0; i < dbInv.length; i += chunkSize) {
           const chunk = dbInv.slice(i, i + chunkSize);
-          console.log(`Syncing tiny chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(dbInv.length/chunkSize)}...`);
-          
-          const { error, status, statusText } = await supabase.from('inventory').insert(chunk);
+          const { error } = await supabase.from('inventory').insert(chunk);
           if (error) {
-            console.error(`Sync error at tiny chunk ${i}: Status ${status} (${statusText})`, error);
             syncError = error;
             break;
           }
-          // 500ms delay to keep the connection "human-speed" for proxies
-          await new Promise(resolve => setTimeout(resolve, 500));
         }
 
         if (syncError) {
-          console.error('재고 DB 동기화 최종 실패:', syncError);
-          alert(`재고 데이터 저장 실패! \n오류 메시지: ${syncError.message} \n상세: ${syncError.details || '브라우저 보안 설정이나 광고 차단기 혹은 네트워크 환경(VPN/회사망)을 확인해 보세요.'}`);
+          console.error('재고 DB 동기화 실패:', syncError);
+          alert(`재고 데이터 저장 실패: ${syncError.message}`);
         } else {
           console.log('재고 DB 동기화 완료');
           alert(`${dbInv.length}개의 재고 데이터를 성공적으로 클라우드에 동기화했습니다!`);
