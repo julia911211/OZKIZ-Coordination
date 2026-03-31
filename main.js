@@ -103,14 +103,30 @@ const calendarBtn = document.querySelector('#calendar-btn');
 async function fetchAllData() {
   console.log('Supabase에서 데이터를 불러오는 중...');
   try {
-    const [invRes, custRes, histRes] = await Promise.all([
-      supabase.from('inventory').select('*').limit(10000),
-      supabase.from('customers').select('*').limit(5000),
-      supabase.from('history').select('*').limit(10000)
+    // Recursive fetch function to bypass 1000 row limit
+    const fetchAllRows = async (table) => {
+      let allData = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await supabase.from(table).select('*').range(from, from + step - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData.push(...data);
+        if (data.length < step) break;
+        from += step;
+      }
+      return allData;
+    };
+
+    const [invData, custData, histData] = await Promise.all([
+      fetchAllRows('inventory'),
+      fetchAllRows('customers'),
+      fetchAllRows('history')
     ]);
 
-    if (invRes.data && invRes.data.length > 0) {
-      currentInventory = invRes.data.map(item => ({
+    if (invData && invData.length > 0) {
+      currentInventory = invData.map(item => ({
         '상품명': item.name,
         '공급처상품명': item.product_code,
         '원가': item.cost,
@@ -122,12 +138,10 @@ async function fetchAllData() {
         '옵션': item.product_option
       }));
       console.log(`Inventory loaded: ${currentInventory.length} items`);
-    } else {
-      console.warn('Inventory table is empty or could not be loaded.');
     }
 
-    if (custRes.data && custRes.data.length > 0) {
-      currentCustomers = custRes.data.map(c => ({
+    if (custData && custData.length > 0) {
+      currentCustomers = custData.map(c => ({
         name: c.name,
         phone: c.phone,
         displayPhone: c.phone,
@@ -141,9 +155,9 @@ async function fetchAllData() {
       }));
     }
 
-    if (histRes.data) {
+    if (histData && histData.length > 0) {
       const map = {};
-      histRes.data.forEach(h => {
+      histData.forEach(h => {
         if (!map[h.phone]) map[h.phone] = [];
         map[h.phone].push(h.product_name);
       });
