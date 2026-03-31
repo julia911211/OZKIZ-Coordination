@@ -104,9 +104,9 @@ async function fetchAllData() {
   console.log('Supabase에서 데이터를 불러오는 중...');
   try {
     const [invRes, custRes, histRes] = await Promise.all([
-      supabase.from('inventory').select('*'),
-      supabase.from('customers').select('*'),
-      supabase.from('history').select('*')
+      supabase.from('inventory').select('*').limit(10000),
+      supabase.from('customers').select('*').limit(5000),
+      supabase.from('history').select('*').limit(10000)
     ]);
 
     if (invRes.data && invRes.data.length > 0) {
@@ -479,7 +479,7 @@ console.log(
 );
       currentInventory = mapped;
 
-      // Supabase Sync
+      // Supabase Sync (Chunked Upsert for large inventory)
       const dbInv = currentInventory.map(item => ({
         name: item['상품명'],
         big_category: item['복종(대카테고리)'],
@@ -492,11 +492,29 @@ console.log(
         product_code: item['공급처상품명']
       }));
 
-      supabase.from('inventory').upsert(dbInv)
-        .then(({ error }) => {
-          if (error) console.error('재고 DB 동기화 실패:', error);
-          else console.log('재고 DB 동기화 완료');
-        });
+      const chunkSize = 500;
+      let syncError = null;
+
+      try {
+        for (let i = 0; i < dbInv.length; i += chunkSize) {
+          const chunk = dbInv.slice(i, i + chunkSize);
+          const { error } = await supabase.from('inventory').upsert(chunk);
+          if (error) {
+            syncError = error;
+            break;
+          }
+        }
+
+        if (syncError) {
+          console.error('재고 DB 동기화 실패:', syncError);
+          alert('재고 데이터를 클라우드에 저장하는 중 오류가 발생했습니다. Supabase 설정(POLICY)을 확인해 주세요.');
+        } else {
+          console.log('재고 DB 동기화 완료');
+          alert(`${dbInv.length}개의 재고 데이터를 불러오고 클라우드에 동기화했습니다!`);
+        }
+      } catch (err) {
+        console.error('Sync process error:', err);
+      }
 
       await idbStorage.set(STORAGE_KEYS.INVENTORY, currentInventory);
       updateStats();
