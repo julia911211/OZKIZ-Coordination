@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+*.log
+build_log.txt
+build_log_full.txt
+.vercel
