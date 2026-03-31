@@ -527,6 +527,10 @@ console.log(
       let syncError = null;
 
       try {
+        // Clear existing inventory first to prevent duplicates
+        console.log('Clearing existing cloud inventory...');
+        await supabase.from('inventory').delete().neq('id', -1);
+
         for (let i = 0; i < dbInv.length; i += chunkSize) {
           const chunk = dbInv.slice(i, i + chunkSize);
           const { error } = await supabase.from('inventory').insert(chunk);
