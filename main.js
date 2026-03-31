@@ -504,20 +504,22 @@ console.log(
         product_code: item['공급처상품명']
       }));
 
-      const chunkSize = 500;
-      let syncError = null;
+        const chunkSize = 100; // Smaller chunks for better stability
+        let syncError = null;
 
-      try {
-        for (let i = 0; i < dbInv.length; i += chunkSize) {
-          const chunk = dbInv.slice(i, i + chunkSize);
-          // Use insert instead of upsert to avoid PK conflict issues in this prototype
-          // We can clear first or just keep adding. For now, let's try insert.
-          const { error } = await supabase.from('inventory').insert(chunk);
-          if (error) {
-            syncError = error;
-            break;
+        try {
+          for (let i = 0; i < dbInv.length; i += chunkSize) {
+            const chunk = dbInv.slice(i, i + chunkSize);
+            console.log(`Uploading chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(dbInv.length/chunkSize)}...`);
+            
+            const { error } = await supabase.from('inventory').insert(chunk);
+            if (error) {
+              syncError = error;
+              break;
+            }
+            // Add a small delay between chunks to prevent rate limiting or network congestion
+            await new Promise(resolve => setTimeout(resolve, 300));
           }
-        }
 
         if (syncError) {
           console.error('재고 DB 동기화 실패:', syncError);
