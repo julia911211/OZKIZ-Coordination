@@ -177,11 +177,7 @@ async function initApp() {
     await preloadDefaultData();
     if (currentInventory.length === 0) currentInventory = mockInventory || [];
   } else {
-    // Sync Success Alert (Only show once per session)
-    if (!sessionStorage.getItem('ozkids_sync_alert_shown')) {
-      alert(`클라우드 동기화 성공: ${currentInventory.length}개의 상품 정보를 불러왔습니다.`);
-      sessionStorage.setItem('ozkids_sync_alert_shown', 'true');
-    }
+    console.log(`클라우드 동기화 성공: ${currentInventory.length}개의 상품 정보를 불러왔습니다.`);
   }
 
   if (currentCustomers.length === 0) currentCustomers = mockCustomers || [];
