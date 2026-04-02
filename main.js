@@ -313,7 +313,7 @@ historyUpload.addEventListener('change', (e) => {
 
       currentCustomers = applyOverrides(newCustomers);
       
-      // Supabase Sync
+      // Supabase Sync (Clear then Chunked Insert)
       const dbData = currentCustomers.map(c => ({
         phone: c.phone,
         name: c.name,
@@ -326,17 +326,35 @@ historyUpload.addEventListener('change', (e) => {
         preference: c.preference
       }));
 
-      supabase.from('customers').upsert(dbData)
-        .then(({ error }) => {
-          if (error) console.error('고객 DB 동기화 실패:', error);
-          else console.log('고객 DB 동기화 완료');
-        });
+      const syncToSupabase = async () => {
+        try {
+          console.log('Testing connection...');
+          const { error: testErr } = await supabase.from('customers').select('phone').limit(1);
+          if (testErr) throw testErr;
+
+          console.log('Clearing old customers...');
+          await supabase.from('customers').delete().neq('phone', '000'); // Delete all
+
+          const chunkSize = 200;
+          for (let i = 0; i < dbData.length; i += chunkSize) {
+            const chunk = dbData.slice(i, i + chunkSize);
+            const { error } = await supabase.from('customers').insert(chunk);
+            if (error) throw error;
+          }
+          console.log('고객 DB 동기화 완료');
+          alert(`${currentCustomers.length}명의 고객 리스트가 클라우드에 안전하게 동기화되었습니다!`);
+        } catch (err) {
+          console.error('고객 DB 동기화 실패:', err);
+          alert('고객 명단 클라우드 저장 중 오류가 발생했습니다. 네트워크를 확인해 주세요.');
+        }
+      };
+
+      syncToSupabase();
 
       saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
       updateStats();
       paydayFilter.value = 'all';
       renderCustomerList(currentCustomers);
-      alert(`${currentCustomers.length}명의 고객 리스트를 불러왔습니다. 클라우드에 동기화되었습니다.`);
     }
   });
 });
@@ -373,26 +391,37 @@ historyDataUpload.addEventListener('change', (e) => {
 
       currentHistoryMap = historyMap;
 
-      // Supabase Sync (Sync new entries)
+      // Supabase Sync (Clear then Chunked Insert)
       const dbEntries = [];
       Object.keys(historyMap).forEach(phone => {
         historyMap[phone].forEach(product => {
-          dbEntries.push({ phone, product_name: product });
+          dbEntries.push({ phone: phone, product_name: product });
         });
       });
 
-      // Simple approach: Clear and re-insert or just upsert?
-      // Since it's a prototype, we'll try to upsert based on phone+product if possible, 
-      // but the schema doesn't have a unique constraint on phone+product.
-      // For now, just insert the new ones or ignore duplicates.
-      supabase.from('history').upsert(dbEntries)
-        .then(({ error }) => {
-          if (error) console.error('이력 DB 동기화 실패:', error);
-        });
+      const syncHistory = async () => {
+        try {
+          console.log('Clearing old history...');
+          await supabase.from('history').delete().neq('phone', '000');
+
+          const chunkSize = 500;
+          for (let i = 0; i < dbEntries.length; i += chunkSize) {
+            const chunk = dbEntries.slice(i, i + chunkSize);
+            const { error } = await supabase.from('history').insert(chunk);
+            if (error) throw error;
+          }
+          console.log('이력 DB 동기화 완료');
+          alert('모든 과거 이력이 클라우드에 안전하게 동기화되었습니다.');
+        } catch (err) {
+          console.error('이력 DB 동기화 실패:', err);
+          alert('이력 데이터 클라우드 저장 중 오류가 발생했습니다.');
+        }
+      };
+
+      syncHistory();
 
       saveToLocal(STORAGE_KEYS.HISTORY, currentHistoryMap);
       renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
-      alert('과거 이력이 연동 및 클라우드 동기화되었습니다.');
     }
   });
 });
