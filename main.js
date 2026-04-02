@@ -345,7 +345,9 @@ historyUpload.addEventListener('change', (e) => {
           alert(`${currentCustomers.length}명의 고객 리스트가 클라우드에 안전하게 동기화되었습니다!`);
         } catch (err) {
           console.error('고객 DB 동기화 실패:', err);
-          alert('고객 명단 클라우드 저장 중 오류가 발생했습니다. 네트워크를 확인해 주세요.');
+          const errorMsg = err.message || JSON.stringify(err);
+          const errorDetail = err.details || '';
+          alert(`고객 명단 저장 실패!\n오류: ${errorMsg}\n상세: ${errorDetail}\n메시지를 찍어 저에게 알려주세요.`);
         }
       };
 
