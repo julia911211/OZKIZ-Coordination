@@ -65,6 +65,27 @@ export const getItemSeason = (item) => {
  * @param {string} season - Current season.
  * @returns {object|null} - A new item or null if none available.
  */
+const getProductionYear = (item) => {
+  const code = (item['공급처상품명'] || '').toString().trim();
+  if (code.length < 2) return 2099; // Unknown
+  
+  const char12 = code.substring(1, 3);
+  const year25 = parseInt(char12);
+  
+  // Rule: If starts with 25 or higher, it's 2025+
+  if (!isNaN(year25) && year25 >= 25 && year25 <= 99) {
+    return 2000 + year25;
+  }
+  
+  // Else use the single digit rule
+  const digit = parseInt(code.charAt(1));
+  if (isNaN(digit)) return 2099;
+  
+  // 5-9: 2015-2019, 0-4: 2020-2024
+  if (digit >= 5) return 2010 + digit;
+  return 2020 + digit;
+};
+
 export function regenItem(customer, currentItem, currentItems, inventory, historyMap, season) {
   const getProductGender = (item) => {
     const code = (item['공급처상품명'] || '').toString().trim();
@@ -117,7 +138,10 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
   });
 
   if (candidates.length === 0) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+
+  // Pick oldest first
+  candidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+  return candidates[0];
 }
 
 export function coordinate(customer, inventory, historyMap, season = '봄/가을') {
@@ -251,15 +275,20 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
         const girls = available.filter(i => getProductGender(i) === 'G');
         const unisex = available.filter(i => getProductGender(i) === 'U');
         
+        // Sort both sub-pools by year
+        girls.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+        unisex.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+
         if (girls.length > 0 && (Math.random() < 0.8 || unisex.length === 0)) {
-          picked = girls[Math.floor(Math.random() * girls.length)];
+          picked = girls[0];
         } else if (unisex.length > 0) {
-          picked = unisex[Math.floor(Math.random() * unisex.length)];
+          picked = unisex[0];
         }
       } 
       
       if (!picked) {
-        picked = available[Math.floor(Math.random() * available.length)];
+        available.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+        picked = available[0];
       }
 
       // Remove from the source list (not available)
@@ -398,5 +427,8 @@ export function addExtraItem(customer, currentItems, inventory, historyMap, seas
   });
 
   if (candidates.length === 0) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+
+  // Pick oldest first
+  candidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+  return candidates[0];
 }
