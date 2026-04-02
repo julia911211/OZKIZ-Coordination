@@ -252,6 +252,19 @@ function updateStats() {
 
 const normalizePhone = (p) => p.toString().replace(/[^0-9]/g, '');
 
+const formatPhone = (p) => {
+  const clean = normalizePhone(p);
+  if (clean.length === 11) {
+    return clean.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+  } else if (clean.length === 10) {
+    if (clean.startsWith('02')) {
+      return clean.replace(/(\d{2})(\d{4})(\d{4})/, '$1-$2-$3');
+    }
+    return clean.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+  }
+  return p;
+};
+
 seasonSelect.addEventListener('change', () => {
   saveToLocal(STORAGE_KEYS.SEASON, seasonSelect.value);
 });
@@ -628,10 +641,21 @@ function renderCustomerList(customers, resultsMap = null) {
 
     const history = currentHistoryMap[c.phone] || [];
     const findProductImage = (name) => {
-      let found = currentInventory.find(inv => inv['상품명'].trim() === name.trim());
+      if (!name) return null;
+      const n = name.trim();
+      // Try exact name match
+      let found = currentInventory.find(inv => inv['상품명'] && inv['상품명'].trim() === n);
       if (found) return found['이미지URL'];
-      found = currentInventory.find(inv => name.trim().includes(inv['상품명'].trim()));
-      return found ? found['이미지URL'] : null;
+      
+      // Try exact code match
+      found = currentInventory.find(inv => inv['공급처상품명'] && inv['공급처상품명'].trim() === n);
+      if (found) return found['이미지URL'];
+      
+      // Try inclusion match
+      found = currentInventory.find(inv => inv['상품명'] && (n.includes(inv['상품명'].trim()) || inv['상품명'].trim().includes(n)));
+      if (found) return found['이미지URL'];
+
+      return null;
     };
 
     const coordEntry = resultsMap ? resultsMap.find(r => r.customerPhone === c.phone) : null;
@@ -710,7 +734,7 @@ function renderCustomerList(customers, resultsMap = null) {
             ${c.name}
             ${c.payDay ? `<div class="payday-badge">매월 ${c.payDay}일 정기결제</div>` : ''}
           </div>
-          <div class="customer-id">${c.displayPhone || c.phone}</div>
+          <div class="customer-id">${formatPhone(c.displayPhone || c.phone)}</div>
         </div>
         <div class="customer-info-grid">
           <div class="info-item"><span class="info-label">성별</span><span class="info-value editable-info" contenteditable="true" data-field="gender" data-phone="${c.phone}">${c.gender}</span></div>
