@@ -293,7 +293,7 @@ menuItems.forEach(item => {
 
     // Update Header Title
     if (targetTab === 'coord') activeViewTitle.textContent = '옷체부 자동 코디';
-    if (targetTab === 'cust-list') activeViewTitle.textContent = '전체 고객 DB';
+    if (targetTab === 'cust-list') activeViewTitle.textContent = '고객 DB';
   });
 });
 
