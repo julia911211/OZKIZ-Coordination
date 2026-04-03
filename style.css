@@ -166,13 +166,13 @@ body {
   background: white;
   border-radius: 1rem; /* rounded-xl */
   padding: 0;
-  overflow: hidden; /* Clip table corners */
+  overflow: visible; /* CRITICAL: Must be visible for sticky header to work */
   border: 1px solid var(--border);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
 .data-table-wrapper {
-  overflow-x: auto;
+  overflow: visible; /* CRITICAL: Must be visible for sticky header to work */
 }
 
 #customer-data-table {
@@ -190,7 +190,7 @@ body {
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  z-index: 50;
+  z-index: 100;
   text-transform: uppercase;
   letter-spacing: 0.025em;
   font-size: 11px;
