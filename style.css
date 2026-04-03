@@ -146,14 +146,15 @@ body {
 
 .tab-view {
   flex: 1;
-  overflow-y: auto;
-  padding: 1.5rem 3rem 3rem 3rem;
   display: none;
+  flex-direction: column; /* Force flex to manage children height */
+  padding: 1.5rem 3rem 3rem 3rem;
   animation: fadeIn 0.4s ease-out;
+  overflow: hidden; /* CRITICAL: Prevent entire tab from scrolling */
 }
 
 .tab-view.active {
-  display: block;
+  display: flex; /* Changed from block to flex */
 }
 
 @keyframes fadeIn {
@@ -163,16 +164,21 @@ body {
 
 /* Table Card Styling */
 .table-container {
+  flex: 1; /* Take all remaining space */
+  display: flex;
+  flex-direction: column;
   background: white;
   border-radius: 1rem; /* rounded-xl */
   padding: 0;
-  overflow: visible; /* CRITICAL: Must be visible for sticky header to work */
+  overflow: hidden; /* Changed from visible back to hidden to clip children */
   border: 1px solid var(--border);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
 .data-table-wrapper {
-  overflow: visible; /* CRITICAL: Must be visible for sticky header to work */
+  flex: 1;
+  overflow-y: auto; /* THE ONLY SCROLLABLE AREA */
+  overflow-x: auto;
 }
 
 #customer-data-table {
