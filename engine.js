@@ -141,7 +141,11 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
 
   // Pick oldest first
   candidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-  return candidates[0];
+
+  // Pick randomly from top N oldest to ensure variety while keeping FIFO priority
+  const topN = 10;
+  const pool = candidates.slice(0, topN);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export function coordinate(customer, inventory, historyMap, season = '봄/가을') {
@@ -280,15 +284,22 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
         unisex.sort((a, b) => getProductionYear(a) - getProductionYear(b));
 
         if (girls.length > 0 && (Math.random() < 0.8 || unisex.length === 0)) {
-          picked = girls[0];
+          // Pick randomly from top N oldest to ensure variety while keeping FIFO priority
+          const topN = 10;
+          const subPool = girls.slice(0, topN);
+          picked = subPool[Math.floor(Math.random() * subPool.length)];
         } else if (unisex.length > 0) {
-          picked = unisex[0];
+          const topN = 10;
+          const subPool = unisex.slice(0, topN);
+          picked = subPool[Math.floor(Math.random() * subPool.length)];
         }
       } 
       
       if (!picked) {
         available.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-        picked = available[0];
+        const topN = 10;
+        const subPool = available.slice(0, topN);
+        picked = subPool[Math.floor(Math.random() * subPool.length)];
       }
 
       // Remove from the source list (not available)
@@ -430,5 +441,9 @@ export function addExtraItem(customer, currentItems, inventory, historyMap, seas
 
   // Pick oldest first
   candidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-  return candidates[0];
+
+  // Pick randomly from top N oldest to ensure variety while keeping FIFO priority
+  const topN = 10;
+  const pool = candidates.slice(0, topN);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
