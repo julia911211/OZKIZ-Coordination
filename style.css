@@ -194,9 +194,24 @@ body {
   color: var(--text-dim);
   border-bottom: 2px solid var(--border);
   position: sticky;
-  top: 0;
-  z-index: 10;
-  box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.05); /* To maintain visibility on scroll */
+  top: -1px; /* Slight offset to ensure it covers the top edge perfectly */
+  z-index: 50;
+  box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure parents don't break sticky header */
+.data-table-wrapper {
+  overflow: visible; /* Changed from auto/hidden to allow sticky to reach main viewport */
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+}
+
+.table-container {
+  background: white;
+  border-radius: 1rem;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  overflow: visible; /* Changed to visible */
 }
 
 #customer-data-table td {
