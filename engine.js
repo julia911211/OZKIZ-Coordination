@@ -142,10 +142,10 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
   // Pick oldest first
   candidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
 
-  // Pick randomly from top N oldest to ensure variety while keeping FIFO priority
-  const topN = 10;
-  const pool = candidates.slice(0, topN);
-  return pool[Math.floor(Math.random() * pool.length)];
+  // Weighted probability selection (FIFO biased but full coverage)
+  // Math.random()^2 biases selection towards the start (oldest) while allowing all items.
+  const idx = Math.floor(Math.pow(Math.random(), 2) * candidates.length);
+  return candidates[idx];
 }
 
 export function coordinate(customer, inventory, historyMap, season = '봄/가을') {
@@ -284,22 +284,20 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
         unisex.sort((a, b) => getProductionYear(a) - getProductionYear(b));
 
         if (girls.length > 0 && (Math.random() < 0.8 || unisex.length === 0)) {
-          // Pick randomly from top N oldest to ensure variety while keeping FIFO priority
-          const topN = 10;
-          const subPool = girls.slice(0, topN);
-          picked = subPool[Math.floor(Math.random() * subPool.length)];
+          girls.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+          const idx = Math.floor(Math.pow(Math.random(), 2) * girls.length);
+          picked = girls[idx];
         } else if (unisex.length > 0) {
-          const topN = 10;
-          const subPool = unisex.slice(0, topN);
-          picked = subPool[Math.floor(Math.random() * subPool.length)];
+          unisex.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+          const idx = Math.floor(Math.pow(Math.random(), 2) * unisex.length);
+          picked = unisex[idx];
         }
       } 
       
       if (!picked) {
         available.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-        const topN = 10;
-        const subPool = available.slice(0, topN);
-        picked = subPool[Math.floor(Math.random() * subPool.length)];
+        const idx = Math.floor(Math.pow(Math.random(), 2) * available.length);
+        picked = available[idx];
       }
 
       // Remove from the source list (not available)
