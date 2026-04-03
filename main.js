@@ -293,7 +293,7 @@ menuItems.forEach(item => {
 
     // Update Header Title
     if (targetTab === 'coord') activeViewTitle.textContent = '옷체부 자동 코디';
-    if (targetTab === 'cust-list') activeViewTitle.textContent = '고객 리스트 관리';
+    if (targetTab === 'cust-list') activeViewTitle.textContent = '전체 고객 DB';
   });
 });
 
@@ -675,8 +675,8 @@ function renderCustomerTable(customers) {
 }
 
 function renderCustomerList(customers, resultsMap = null) {
-  // Sync with customer table view as well
-  renderCustomerTable(customers);
+  // Always show the FULL database in the table view, ignoring coord filters
+  renderCustomerTable(currentCustomers);
 
   const catMap = getCategoryOptions(currentInventory);
   const bigCatOptions = Object.keys(catMap)
