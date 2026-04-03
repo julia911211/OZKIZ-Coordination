@@ -270,6 +270,33 @@ seasonSelect.addEventListener('change', () => {
   saveToLocal(STORAGE_KEYS.SEASON, seasonSelect.value);
 });
 
+// Tab Switching Logic
+const menuItems = document.querySelectorAll('.menu-item:not(.disabled)');
+const tabViews = document.querySelectorAll('.tab-view');
+const activeViewTitle = document.querySelector('#active-view-title');
+
+menuItems.forEach(item => {
+  item.addEventListener('click', () => {
+    const targetTab = item.dataset.tab;
+    
+    // Update menu active state
+    menuItems.forEach(mi => mi.classList.remove('active'));
+    item.classList.add('active');
+    
+    // Update view active state
+    tabViews.forEach(view => {
+      view.classList.remove('active');
+      if (view.id === `${targetTab}-view`) {
+        view.classList.add('active');
+      }
+    });
+
+    // Update Header Title
+    if (targetTab === 'coord') activeViewTitle.textContent = '옷체부 자동 코디';
+    if (targetTab === 'cust-list') activeViewTitle.textContent = '고객 리스트 관리';
+  });
+});
+
 // 1. Customer List Upload
 historyUpload.addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -620,7 +647,37 @@ const getCategoryOptions = (inventory) => {
   return map;
 };
 
+function renderCustomerTable(customers) {
+  const tableBody = document.querySelector('#customer-table-body');
+  if (!tableBody) return;
+
+  tableBody.innerHTML = '';
+
+  if (customers.length === 0) {
+    tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-dim);">검색 결과가 없습니다.</td></tr>';
+    return;
+  }
+
+  customers.forEach(c => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:700;">${c.name}</td>
+      <td>${formatPhone(c.displayPhone || c.phone)}</td>
+      <td style="color:var(--primary); font-weight:600;">${c.regId || '-'}</td>
+      <td><span class="badge ${c.gender === '여아' ? 'pink' : (c.gender === '남아' ? 'blue' : '')}">${c.gender}</span></td>
+      <td>${c.clothSize}</td>
+      <td>${c.shoeSize}</td>
+      <td>매월 ${c.payDay}일</td>
+      <td>${c.childCount}명</td>
+    `;
+    tableBody.appendChild(tr);
+  });
+}
+
 function renderCustomerList(customers, resultsMap = null) {
+  // Sync with customer table view as well
+  renderCustomerTable(customers);
+
   const catMap = getCategoryOptions(currentInventory);
   const bigCatOptions = Object.keys(catMap)
     .sort((a, b) => a.localeCompare(b, 'ko'))
