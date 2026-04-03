@@ -74,6 +74,7 @@ let currentCustomers = loadFromLocal(STORAGE_KEYS.CUSTOMERS, mockCustomers || []
 let currentHistoryMap = loadFromLocal(STORAGE_KEYS.HISTORY, mockHistory || {});
 let currentOverrides = loadFromLocal(STORAGE_KEYS.OVERRIDES, {});
 let lastCoordResults = [];
+let sessionRejectedMap = {}; // Track rejected items per customer in THIS session
 
 function applyOverrides(customers) {
   return customers.map(c => {
@@ -781,7 +782,15 @@ function renderCustomerList(customers, resultsMap = null) {
         const entry = lastCoordResults.find(r => r.customerPhone === c.phone);
         if (!entry) return;
         const result = entry.sets[sIdx];
-        const newItem = regenItem(c, result.items[idx], result.items, currentInventory, currentHistoryMap, season);
+        
+        // Record as rejected in this session
+        const rejectedName = (result.items[idx]['상품명'] || '').toString().trim();
+        if (!sessionRejectedMap[c.phone]) sessionRejectedMap[c.phone] = [];
+        if (!sessionRejectedMap[c.phone].includes(rejectedName)) {
+          sessionRejectedMap[c.phone].push(rejectedName);
+        }
+
+        const newItem = regenItem(c, result.items[idx], result.items, currentInventory, currentHistoryMap, season, sessionRejectedMap[c.phone]);
         if (!newItem) return alert('대체할 수 있는 동일 카테고리 상품이 없습니다.');
         result.items[idx] = newItem;
         result.totalCost = result.items.reduce((s, i) => s + (parseInt(i['원가']) || 0), 0);
@@ -894,7 +903,8 @@ function renderCustomerList(customers, resultsMap = null) {
           currentHistoryMap,
           season,
           targetBig,
-          targetSub
+          targetSub,
+          sessionRejectedMap[c.phone] || []
         );
 
         if (!newItem) {
@@ -1066,6 +1076,7 @@ function applyMainFilters(customers) {
 runBtn.addEventListener('click', () => {
   const season = seasonSelect.value;
   lastCoordResults = [];
+  sessionRejectedMap = {}; // Reset session rejections on fresh run if desired
   currentCustomers.forEach(c => {
     const count = c.childCount || 1;
     const sets = [];

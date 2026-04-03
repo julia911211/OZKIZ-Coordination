@@ -86,7 +86,7 @@ const getProductionYear = (item) => {
   return 2020 + digit;
 };
 
-export function regenItem(customer, currentItem, currentItems, inventory, historyMap, season) {
+export function regenItem(customer, currentItem, currentItems, inventory, historyMap, season, rejectedList = []) {
   const getProductGender = (item) => {
     const code = (item['공급처상품명'] || '').toString().trim();
     if (!code) return 'U';
@@ -139,13 +139,23 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
 
   if (candidates.length === 0) return null;
 
-  // Pick oldest first
-  candidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+  // Filter out session rejections
+  let finalCandidates = candidates.filter(item => !rejectedList.includes((item['상품명'] || '').toString().trim()));
+  
+  // If ALL matching items are rejected, reset by using full candidates
+  if (finalCandidates.length === 0 && candidates.length > 0) {
+    console.log('Session rejections exhausted. Resetting for this category.');
+    finalCandidates = candidates;
+  }
+
+  if (finalCandidates.length === 0) return null;
+
+  // Sort oldest first
+  finalCandidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
 
   // Weighted probability selection (FIFO biased but full coverage)
-  // Math.random()^2 biases selection towards the start (oldest) while allowing all items.
-  const idx = Math.floor(Math.pow(Math.random(), 2) * candidates.length);
-  return candidates[idx];
+  const idx = Math.floor(Math.pow(Math.random(), 2) * finalCandidates.length);
+  return finalCandidates[idx];
 }
 
 export function coordinate(customer, inventory, historyMap, season = '봄/가을') {
@@ -390,7 +400,7 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
   return bestAttempt;
 }
 
-export function addExtraItem(customer, currentItems, inventory, historyMap, season, targetBigCat = null, targetSubCat = null) {
+export function addExtraItem(customer, currentItems, inventory, historyMap, season, targetBigCat = null, targetSubCat = null, rejectedList = []) {
   const getProductGender = (item) => {
     const code = (item['공급처상품명'] || '').toString().trim();
     if (!code) return 'U';
@@ -437,11 +447,19 @@ export function addExtraItem(customer, currentItems, inventory, historyMap, seas
 
   if (candidates.length === 0) return null;
 
-  // Pick oldest first
-  candidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+  // Filter out session rejections
+  let finalCandidates = candidates.filter(item => !rejectedList.includes((item['상품명'] || '').toString().trim()));
+  
+  if (finalCandidates.length === 0 && candidates.length > 0) {
+    finalCandidates = candidates;
+  }
 
-  // Pick randomly from top N oldest to ensure variety while keeping FIFO priority
-  const topN = 10;
-  const pool = candidates.slice(0, topN);
-  return pool[Math.floor(Math.random() * pool.length)];
+  if (finalCandidates.length === 0) return null;
+
+  // Sort oldest first
+  finalCandidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+
+  // Weighted probability selection (FIFO biased but full coverage)
+  const idx = Math.floor(Math.pow(Math.random(), 2) * finalCandidates.length);
+  return finalCandidates[idx];
 }
