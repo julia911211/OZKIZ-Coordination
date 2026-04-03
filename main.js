@@ -661,9 +661,9 @@ function renderCustomerTable(customers) {
   customers.forEach(c => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
+      <td style="color:var(--primary); font-weight:600;">${c.regId || '-'}</td>
       <td style="font-weight:700;">${c.name}</td>
       <td>${formatPhone(c.displayPhone || c.phone)}</td>
-      <td style="color:var(--primary); font-weight:600;">${c.regId || '-'}</td>
       <td><span class="badge ${c.gender === '여아' ? 'pink' : (c.gender === '남아' ? 'blue' : '')}">${c.gender}</span></td>
       <td>${c.clothSize}</td>
       <td>${c.shoeSize}</td>
