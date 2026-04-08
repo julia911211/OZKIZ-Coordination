@@ -312,7 +312,6 @@ historyUpload.addEventListener('change', (e) => {
     complete: (results) => {
       const data = results.data;
       const newCustomers = [];
-      const seenPhones = new Set();
 
       data.forEach(row => {
         const findValue = (keywords) => {
@@ -338,8 +337,7 @@ historyUpload.addEventListener('change', (e) => {
           if (!preference.startsWith('*')) preference = '* ' + preference;
         }
 
-        if (phone && !seenPhones.has(phone)) {
-          seenPhones.add(phone);
+        if (name) {
           newCustomers.push({
             name: name || '이름없음',
             regId: regId || '-',
