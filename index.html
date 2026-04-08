@@ -27,15 +27,7 @@
             <span class="menu-icon">👥</span>
             <span class="menu-label">고객 DB</span>
           </button>
-          <div class="menu-divider"></div>
-          <button class="menu-item disabled">
-            <span class="menu-icon">📦</span>
-            <span class="menu-label">재고 현황</span>
-          </button>
-          <button class="menu-item disabled">
-            <span class="menu-icon">📊</span>
-            <span class="menu-label">대시보드</span>
-          </button>
+
         </div>
 
         <div class="sidebar-footer">
@@ -114,7 +106,10 @@
           <section class="table-container card-shadow">
             <div class="table-actions">
               <div class="table-filters">
-                <!-- Search is global, so no separate search here for now -->
+                <div class="search-input-group" style="display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 12px; width: 350px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); margin-bottom: 20px;">
+                  <span class="search-icon" style="margin-right: 8px; color: #94a3b8;">🔍</span>
+                  <input type="text" id="customer-db-search" placeholder="이름, 연락처, 신청번호 검색..." style="border: none; outline: none; width: 100%; font-size: 14px; color: #1e293b; background: transparent;">
+                </div>
               </div>
             </div>
             <div class="data-table-wrapper">

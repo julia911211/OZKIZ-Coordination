@@ -293,7 +293,10 @@ menuItems.forEach(item => {
 
     // Update Header Title
     if (targetTab === 'coord') activeViewTitle.textContent = '옷체부 자동 코디';
-    if (targetTab === 'cust-list') activeViewTitle.textContent = '고객 DB';
+    if (targetTab === 'cust-list') {
+      activeViewTitle.textContent = '고객 DB';
+      renderCustomerList(currentCustomers, lastCoordResults);
+    }
   });
 });
 
@@ -677,6 +680,31 @@ function renderCustomerTable(customers) {
 function renderCustomerList(customers, resultsMap = null) {
   // Always show the FULL database in the table view, ignoring coord filters
   renderCustomerTable(currentCustomers);
+  
+  // -- BULLETPROOF DYNAMIC SEARCH INJECTION ------------------------------------
+  const listContainer = document.querySelector('#cust-list-view .table-container');
+  if (listContainer && !document.getElementById('customer-db-search-dynamic')) {
+    const searchHtml = `
+      <div style="padding: 10px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; z-index: 100; margin-bottom: 20px;">
+        <div class="search-input-group" style="display: flex; align-items: center; background: white; border: 2px solid #3b82f6; border-radius: 8px; padding: 10px 16px; width: 400px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+          <span class="search-icon" style="margin-right: 12px; color: #3b82f6; font-size: 16px;">🔍</span>
+          <input type="text" id="customer-db-search-dynamic" placeholder="이름, 연락처, 신청번호 강력 검색..." style="border: none; outline: none; width: 100%; font-size: 15px; color: #1e293b; background: transparent; font-weight: 600;">
+        </div>
+      </div>
+    `;
+    listContainer.insertAdjacentHTML('afterbegin', searchHtml);
+    document.getElementById('customer-db-search-dynamic').addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      const filtered = currentCustomers?.filter(c => 
+        (c.name && c.name.toLowerCase().includes(q)) || 
+        (c.phone && c.phone.includes(q)) || 
+        (c.displayPhone && c.displayPhone.includes(q)) || 
+        (c.regId && c.regId.toString().includes(q))
+      ) || [];
+      renderCustomerTable(filtered);
+    });
+  }
+  // ----------------------------------------------------------------------------
 
   const catMap = getCategoryOptions(currentInventory);
   const bigCatOptions = Object.keys(catMap)
@@ -1152,3 +1180,25 @@ if (currentCustomers.length > 0 && currentInventory.length > 0) {
 customerSearch.addEventListener('input', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
 paydayFilter.addEventListener('change', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
 calendarBtn.addEventListener('click', () => paydayFilter.focus());
+
+// 고객 DB 탭 검색창
+const customerDbSearch = document.getElementById('customer-db-search');
+if (customerDbSearch) {
+  customerDbSearch.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    if (!q) {
+      renderCustomerTable(currentCustomers);
+      return;
+    }
+    const filtered = currentCustomers.filter(c =>
+      (c.name && c.name.toLowerCase().includes(q)) ||
+      (c.phone && c.phone.includes(q)) ||
+      (c.displayPhone && c.displayPhone.includes(q)) ||
+      (c.regId && c.regId.toString().toLowerCase().includes(q)) ||
+      (c.clothSize && c.clothSize.toString().includes(q)) ||
+      (c.shoeSize && c.shoeSize.toString().includes(q)) ||
+      (c.gender && c.gender.includes(q))
+    );
+    renderCustomerTable(filtered);
+  });
+}
