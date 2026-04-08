@@ -356,17 +356,24 @@ historyUpload.addEventListener('change', (e) => {
       currentCustomers = applyOverrides(newCustomers);
       
       // Supabase Sync (Clear then Chunked Insert)
-      const dbData = currentCustomers.map(c => ({
-        phone: c.phone,
-        name: c.name,
-        reg_id: c.regId,
-        gender: c.gender,
-        cloth_size: c.clothSize,
-        shoe_size: c.shoeSize,
-        pay_day: c.payDay,
-        child_count: c.childCount,
-        preference: c.preference
-      }));
+      // 같은 전화번호 고객이 여러 명인 경우 reg_id를 붙여 고유값 생성
+      const phoneCounts = {};
+      const dbData = currentCustomers.map(c => {
+        const base = c.phone;
+        phoneCounts[base] = (phoneCounts[base] || 0) + 1;
+        const uniquePhone = phoneCounts[base] === 1 ? base : `${base}_${phoneCounts[base]}`;
+        return {
+          phone: uniquePhone,
+          name: c.name,
+          reg_id: c.regId,
+          gender: c.gender,
+          cloth_size: c.clothSize,
+          shoe_size: c.shoeSize,
+          pay_day: c.payDay,
+          child_count: c.childCount,
+          preference: c.preference
+        };
+      });
 
       const syncToSupabase = async () => {
         try {
