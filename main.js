@@ -677,9 +677,110 @@ function renderCustomerTable(customers) {
       <td>${c.shoeSize}</td>
       <td>매월 ${c.payDay}일</td>
       <td>${c.childCount}명</td>
+      <td>
+        <button onclick="deleteCustomer('${c.phone}', '${c.regId}')" style="background:none;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;color:#94a3b8;cursor:pointer;" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#94a3b8'">삭제</button>
+      </td>
     `;
     tableBody.appendChild(tr);
   });
+}
+
+// ─── 고객 삭제 ────────────────────────────────────────────────────────────────
+function deleteCustomer(phone, regId) {
+  if (!confirm('이 고객을 삭제하시겠습니까?')) return;
+  currentCustomers = currentCustomers.filter(c => !(c.phone === phone && c.regId === regId));
+  saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
+  supabase.from('customers').delete().eq('reg_id', regId).then(() => {});
+  renderCustomerList(currentCustomers, lastCoordResults);
+  document.getElementById('total-customers').textContent = currentCustomers.length;
+}
+
+// ─── 고객 추가 모달 ───────────────────────────────────────────────────────────
+function openAddCustomerModal() {
+  const existing = document.getElementById('add-customer-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'add-customer-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:white;border-radius:1.5rem;padding:2rem;width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.3);">
+      <h2 style="font-size:1.3rem;font-weight:800;margin-bottom:1.5rem;color:#1e293b;">고객 추가</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        ${field('신청번호', 'new-regId', '예: S-20260401-0000001')}
+        ${field('이름', 'new-name', '예: 홍길동')}
+        ${field('연락처', 'new-phone', '예: 010-1234-5678')}
+        <div>
+          <label style="${labelStyle}">성별</label>
+          <select id="new-gender" style="${inputStyle}">
+            <option value="여아">여아</option>
+            <option value="남아">남아</option>
+          </select>
+        </div>
+        ${field('의류 사이즈', 'new-clothSize', '예: 120')}
+        ${field('슈즈 사이즈', 'new-shoeSize', '예: 180')}
+        ${field('정기결제일 (일)', 'new-payDay', '예: 15')}
+        ${field('아이 수', 'new-childCount', '예: 1')}
+      </div>
+      <div style="margin-top:1rem;">
+        <label style="${labelStyle}">취향/메모</label>
+        <textarea id="new-preference" placeholder="예: 핑크색 선호, 캐주얼 스타일" style="${inputStyle}height:80px;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:0.75rem;margin-top:1.5rem;">
+        <button onclick="confirmAddCustomer()" style="flex:1;background:var(--primary);color:white;border:none;border-radius:0.75rem;padding:0.85rem;font-size:1rem;font-weight:700;cursor:pointer;">추가하기</button>
+        <button onclick="document.getElementById('add-customer-modal').remove()" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:0.75rem;padding:0.85rem;font-size:1rem;font-weight:700;cursor:pointer;">취소</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+const labelStyle = 'display:block;font-size:0.75rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem;';
+const inputStyle = 'width:100%;padding:0.6rem 0.8rem;border:1px solid #e2e8f0;border-radius:0.5rem;font-size:0.95rem;color:#1e293b;outline:none;box-sizing:border-box;';
+function field(label, id, placeholder) {
+  return `<div><label style="${labelStyle}">${label}</label><input id="${id}" placeholder="${placeholder}" style="${inputStyle}" /></div>`;
+}
+
+function confirmAddCustomer() {
+  const get = id => document.getElementById(id)?.value.trim() || '';
+  const name = get('new-name');
+  const phone = get('new-phone');
+  if (!name || !phone) { alert('이름과 연락처는 필수입니다.'); return; }
+
+  const newCustomer = {
+    regId: get('new-regId') || '-',
+    name,
+    phone: normalizePhone(phone),
+    displayPhone: phone,
+    gender: get('new-gender') || '여아',
+    clothSize: get('new-clothSize') || '-',
+    shoeSize: get('new-shoeSize') || '-',
+    payDay: get('new-payDay') || '-',
+    childCount: parseInt(get('new-childCount')) || 1,
+    preference: get('new-preference') || '없음',
+  };
+
+  currentCustomers.push(newCustomer);
+  saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
+
+  // Supabase 저장
+  supabase.from('customers').insert({
+    phone: newCustomer.phone,
+    name: newCustomer.name,
+    reg_id: newCustomer.regId,
+    gender: newCustomer.gender,
+    cloth_size: newCustomer.clothSize,
+    shoe_size: newCustomer.shoeSize,
+    pay_day: newCustomer.payDay,
+    child_count: newCustomer.childCount,
+    preference: newCustomer.preference
+  }).then(({ error }) => { if (error) console.warn('Supabase 저장 실패:', error.message); });
+
+  document.getElementById('add-customer-modal').remove();
+  renderCustomerList(currentCustomers, lastCoordResults);
+  document.getElementById('total-customers').textContent = currentCustomers.length;
+  alert(`${name} 고객이 추가되었습니다!`);
 }
 
 function renderCustomerList(customers, resultsMap = null) {
@@ -1161,6 +1262,9 @@ if (currentCustomers.length > 0 && currentInventory.length > 0) {
 customerSearch.addEventListener('input', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
 paydayFilter.addEventListener('change', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
 calendarBtn.addEventListener('click', () => paydayFilter.focus());
+
+// 고객 추가 버튼
+document.getElementById('add-customer-btn')?.addEventListener('click', openAddCustomerModal);
 
 // 고객 DB 탭 검색창
 const customerDbSearch = document.getElementById('customer-db-search');
