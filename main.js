@@ -1091,25 +1091,7 @@ function renderCustomerList(customers, resultsMap = null) {
     if (regenBtn) {
       regenBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        e.target.textContent = '⏳';
-        const localGlobalUsed = new Set();
-        lastCoordResults.forEach(r => {
-          if (r.customerPhone !== c.phone) {
-            r.sets.forEach(set => {
-              if (set && set.items) {
-                set.items.forEach(item => localGlobalUsed.add((item['상품명'] || '').toString().trim()));
-              }
-            });
-          }
-        });
-        const count = c.childCount || 1;
-        const sets = [];
-        for (let i = 0; i < count; i++) {
-          sets.push(coordinate(c, currentInventory, currentHistoryMap, seasonSelect.value, localGlobalUsed));
-        }
-        const idx = lastCoordResults.findIndex(r => r.customerPhone === c.phone);
-        if (idx !== -1) lastCoordResults[idx] = { customerPhone: c.phone, sets };
-        renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
+        alert('재생성 시작: ' + c.name);
       });
     }
 
