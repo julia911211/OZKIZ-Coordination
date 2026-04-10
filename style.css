@@ -75,6 +75,16 @@ body {
   margin-left: 2px;
 }
 
+.sidebar-section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0 0.85rem;
+  margin-bottom: 0.4rem;
+}
+
 .sidebar-menu {
   flex: 1;
   display: flex;
