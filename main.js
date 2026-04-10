@@ -912,7 +912,7 @@ function renderCustomerList(customers, resultsMap = null) {
         </div>
         <div class="card-actions">
           <button class="save-btn" data-phone="${c.phone}">✅ 코디 확정 (이력 저장)</button>
-          <button class="regen-card-btn" data-phone="${c.phone}" title="이 고객 코디만 재생성">🔄</button>
+          <button class="regen-card-btn" title="이 고객 코디만 재생성" onclick="event.stopPropagation(); window.regenSingleCard('${c.phone}')">🔄</button>
         </div>
         <div class="card-hint">클릭해서 과거 이력 보기</div>
       </div>
@@ -1117,29 +1117,6 @@ function renderCustomerList(customers, resultsMap = null) {
       }
     });
 
-    card.querySelector('.regen-card-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // Build globalUsed from all OTHER customers' assigned items
-      const localGlobalUsed = new Set();
-      lastCoordResults.forEach(r => {
-        if (r.customerPhone !== c.phone) {
-          r.sets.forEach(set => {
-            if (set && set.items) {
-              set.items.forEach(item => localGlobalUsed.add((item['상품명'] || '').toString().trim()));
-            }
-          });
-        }
-      });
-      // Regenerate only this customer
-      const count = c.childCount || 1;
-      const sets = [];
-      for (let i = 0; i < count; i++) {
-        sets.push(coordinate(c, currentInventory, currentHistoryMap, seasonSelect.value, localGlobalUsed));
-      }
-      const idx = lastCoordResults.findIndex(r => r.customerPhone === c.phone);
-      if (idx !== -1) lastCoordResults[idx] = { customerPhone: c.phone, sets };
-      renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
-    });
 
     const editables = card.querySelectorAll('.editable-info');
     editables.forEach(el => {
@@ -1313,3 +1290,30 @@ if (customerDbSearch) {
     renderCustomerTable(filtered);
   });
 }
+
+// Global function for per-card coordination regeneration
+window.regenSingleCard = function(phone) {
+  const customer = currentCustomers.find(c => c.phone === phone);
+  if (!customer) return;
+
+  const localGlobalUsed = new Set();
+  lastCoordResults.forEach(r => {
+    if (r.customerPhone !== phone) {
+      r.sets.forEach(set => {
+        if (set && set.items) {
+          set.items.forEach(item => localGlobalUsed.add((item['상품명'] || '').toString().trim()));
+        }
+      });
+    }
+  });
+
+  const count = customer.childCount || 1;
+  const sets = [];
+  for (let i = 0; i < count; i++) {
+    sets.push(coordinate(customer, currentInventory, currentHistoryMap, seasonSelect.value, localGlobalUsed));
+  }
+
+  const idx = lastCoordResults.findIndex(r => r.customerPhone === phone);
+  if (idx !== -1) lastCoordResults[idx] = { customerPhone: phone, sets };
+  renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
+};
