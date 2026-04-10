@@ -250,8 +250,8 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
       const pickFrom = (pool) => {
         if (pool.length === 0) return null;
         if (randomize) {
-          // 랜덤 재생성: 오래된 상위 절반 중 랜덤 선택
-          const topN = Math.max(1, Math.ceil(pool.length / 2));
+          // 랜덤 재생성: 오래된 상위 20% 중 랜덤 선택 (오래된 제품 우선)
+          const topN = Math.max(1, Math.ceil(pool.length * 0.2));
           return pool[Math.floor(Math.random() * topN)];
         }
         return pool[0];
