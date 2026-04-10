@@ -1091,21 +1091,32 @@ function renderCustomerList(customers, resultsMap = null) {
     if (regenBtn) {
       regenBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const localGlobalUsed = new Set();
-        lastCoordResults.forEach(r => {
-          if (r.customerPhone !== c.phone) {
-            r.sets.forEach(set => {
-              if (set && set.items) {
-                set.items.forEach(item => localGlobalUsed.add((item['상품명'] || '').toString().trim()));
-              }
-            });
-          }
-        });
+
+        // 이번 세션에서 이 고객한테 보여준 제품은 모두 제외
+        const entry = lastCoordResults.find(r => r.customerPhone === c.phone);
+        if (entry) {
+          if (!sessionRejectedMap[c.phone]) sessionRejectedMap[c.phone] = [];
+          entry.sets.forEach(set => {
+            if (set && set.items) {
+              set.items.forEach(item => {
+                const name = (item['상품명'] || '').toString().trim();
+                if (!sessionRejectedMap[c.phone].includes(name)) {
+                  sessionRejectedMap[c.phone].push(name);
+                }
+              });
+            }
+          });
+        }
+
+        // 다른 고객 배정 제품은 제외 안 함 — 풀 최대화
+        const seenByCustomer = new Set(sessionRejectedMap[c.phone] || []);
+
         const count = c.childCount || 1;
         const sets = [];
         for (let i = 0; i < count; i++) {
-          sets.push(coordinate(c, currentInventory, currentHistoryMap, seasonSelect.value, localGlobalUsed, true));
+          sets.push(coordinate(c, currentInventory, currentHistoryMap, seasonSelect.value, seenByCustomer, true));
         }
+
         const idx = lastCoordResults.findIndex(r => r.customerPhone === c.phone);
         if (idx !== -1) {
           lastCoordResults[idx] = { customerPhone: c.phone, sets };
