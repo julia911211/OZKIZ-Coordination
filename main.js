@@ -912,7 +912,7 @@ function renderCustomerList(customers, resultsMap = null) {
         </div>
         <div class="card-actions">
           <button class="save-btn" data-phone="${c.phone}">✅ 코디 확정 (이력 저장)</button>
-          <button class="regen-card-btn" title="이 고객 코디만 재생성" onclick="event.stopPropagation(); window.regenSingleCard('${c.phone}')">🔄</button>
+          <button class="regen-card-btn" data-regen-phone="${c.phone}" title="이 고객 코디만 재생성">🔄</button>
         </div>
         <div class="card-hint">클릭해서 과거 이력 보기</div>
       </div>
@@ -1291,8 +1291,13 @@ if (customerDbSearch) {
   });
 }
 
-// Global function for per-card coordination regeneration
-window.regenSingleCard = function(phone) {
+// Event delegation for regen button on resultsContainer
+resultsContainer.addEventListener('click', (e) => {
+  const btn = e.target.closest('.regen-card-btn');
+  if (!btn) return;
+  e.stopPropagation();
+
+  const phone = btn.dataset.regenPhone;
   const customer = currentCustomers.find(c => c.phone === phone);
   if (!customer) return;
 
@@ -1316,4 +1321,4 @@ window.regenSingleCard = function(phone) {
   const idx = lastCoordResults.findIndex(r => r.customerPhone === phone);
   if (idx !== -1) lastCoordResults[idx] = { customerPhone: phone, sets };
   renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
-};
+});
