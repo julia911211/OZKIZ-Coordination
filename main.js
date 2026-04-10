@@ -1243,12 +1243,13 @@ function applyMainFilters(customers) {
 runBtn.addEventListener('click', () => {
   const season = seasonSelect.value;
   lastCoordResults = [];
-  sessionRejectedMap = {}; // Reset session rejections on fresh run if desired
+  sessionRejectedMap = {};
+  const globalUsed = new Set(); // Shared across all customers: oldest items assigned first
   currentCustomers.forEach(c => {
     const count = c.childCount || 1;
     const sets = [];
     for (let i = 0; i < count; i++) {
-      sets.push(coordinate(c, currentInventory, currentHistoryMap, season));
+      sets.push(coordinate(c, currentInventory, currentHistoryMap, season, globalUsed));
     }
     lastCoordResults.push({ customerPhone: c.phone, sets });
   });

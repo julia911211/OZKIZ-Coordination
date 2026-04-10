@@ -158,95 +158,78 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
   return finalCandidates[idx];
 }
 
-export function coordinate(customer, inventory, historyMap, season = '봄/가을') {
+export function coordinate(customer, inventory, historyMap, season = '봄/가을', globalUsed = new Set()) {
   const customerHistory = historyMap[customer.phone] || [];
-  
-  // 1. Gender Logic based on '공급처상품명'
+
+  // 1. Gender Logic
   const getProductGender = (item) => {
     const code = (item['공급처상품명'] || '').toString().trim();
-    if (!code) return 'U'; // Default to Unisex if no code
+    if (!code) return 'U';
     const lastChar = code.charAt(code.length - 1).toUpperCase();
     return ['G', 'B', 'U'].includes(lastChar) ? lastChar : 'U';
   };
 
   const isGenderCompatible = (item, customerGender) => {
     const pGender = getProductGender(item);
-    if (customerGender === '여아') {
-      // Girls: G is primary, U is secondary/occasional. B is excluded.
-      return pGender === 'G' || pGender === 'U';
-    } else if (customerGender === '남아') {
-      // Boys: B and U are both compatible. G is excluded.
-      return pGender === 'B' || pGender === 'U';
-    }
-    return true; // Fallback
+    if (customerGender === '여아') return pGender === 'G' || pGender === 'U';
+    if (customerGender === '남아') return pGender === 'B' || pGender === 'U';
+    return true;
   };
 
-  // 3. Category Detection
+  // 2. Category Detection
   const getCategory = (item) => {
     const bigCat = (item['복종(대카테고리)'] || '').toString().trim();
     const cat = item['복종'] || '';
     const name = item['상품명'] || '';
     const text = (cat + ' ' + name).toLowerCase();
-    
+
     if (bigCat === '슈즈' || bigCat === '신발' || text.includes('슈즈') || text.includes('운동화') || text.includes('구두') || text.includes('신발') || text.includes('장화') || text.includes('부츠') || text.includes('실내화') || text.includes('샌들') || text.includes('슬리퍼')) return 'shoes';
-    
-    // Outer sub-categories
     if (text.includes('가디건')) return 'outer-cardigan';
     if (text.includes('조끼') || text.includes('베스트')) return 'outer-vest';
     if (text.includes('점퍼') || text.includes('패딩')) return 'outer-jumper';
     if (text.includes('코트')) return 'outer-coat';
     if (text.includes('자켓')) return 'outer-jacket';
-    
     if (text.includes('아우터')) return 'outer';
-    
     if (text.includes('상하복') || text.includes('세트') || text.includes('원피스')) return 'set';
     if (text.includes('상의') || text.includes('티셔츠') || text.includes('맨투맨') || text.includes('셔츠')) return 'top';
     if (text.includes('하의') || text.includes('바지') || text.includes('팬츠') || text.includes('치마')) return 'bottom';
-
-    // Accessory / Gift Detection
     if (bigCat === '잡화' || bigCat === '사은품') return 'accessory';
-
     return 'clothing';
   };
 
-  // 4. Filtering
+  // 3. Filter inventory
   const filteredInventory = inventory.filter(item => {
     if (!item['상품명']) return false;
+    const name = (item['상품명'] || '').toString().trim();
 
-    // Exclude manual-only categories
+    // Exclude globally used items (already assigned to other customers)
+    if (globalUsed.has(name)) return false;
+
     const bigCat = (item['복종(대카테고리)'] || '').toString().trim();
     if (['잡화', '사은품', '레인', '부자재'].includes(bigCat)) return false;
-    
-    // Season check
+
     const itemSeason = getItemSeason(item);
     if (season !== '사계절' && itemSeason !== '사계절' && itemSeason !== season) return false;
 
-    // History check
     const isAlreadyBought = customerHistory.some(h => {
-      const name = item['상품명'].toString().trim();
       return name === h.trim() || h.includes(name) || name.includes(h.trim());
     });
     if (isAlreadyBought) return false;
 
-    // Gender check
     if (!isGenderCompatible(item, customer.gender)) return false;
-
-    // Size check
     if (!isSizeCompatible(item, customer)) return false;
 
-    // Stock check (More Robust)
     let stock = item['가용재고'];
-    if (typeof stock === 'string') {
-      stock = parseInt(stock.replace(/[^0-9-]/g, ''));
-    }
-    if (stock !== null && stock !== undefined && !isNaN(stock) && stock <= 0) {
-      return false;
-    }
+    if (typeof stock === 'string') stock = parseInt(stock.replace(/[^0-9-]/g, ''));
+    if (stock !== null && stock !== undefined && !isNaN(stock) && stock <= 0) return false;
 
     return true;
   });
 
-  // 5. Grouping
+  // 4. Sort all by production year (oldest first)
+  filteredInventory.sort((a, b) => getProductionYear(a) - getProductionYear(b));
+
+  // 5. Group by category (order preserved = oldest first within each group)
   const poolBase = {
     shoes: filteredInventory.filter(i => getCategory(i) === 'shoes'),
     outer: filteredInventory.filter(i => getCategory(i).startsWith('outer')),
@@ -256,148 +239,89 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
     clothing: filteredInventory.filter(i => getCategory(i) === 'clothing')
   };
 
-  // 6. Selection Logic with Budget Optimization
-  const MAX_TRIES = 500;
-  let bestAttempt = null;
+  // 6. Deterministic oldest-first pick (no randomness)
+  const buildResult = (useSet) => {
+    const usedNames = new Set();
 
-  for (let t = 0; t < MAX_TRIES; t++) {
-    const lastCoordResults = []; // If you need it
-
-    let selected = [];
-    let selectedNames = new Set(); // Track selected product names for duplicate prevention
-    
-    const pool = {
-      shoes: [...poolBase.shoes],
-      outer: [...poolBase.outer],
-      set: [...poolBase.set],
-      top: [...poolBase.top],
-      bottom: [...poolBase.bottom],
-      clothing: [...poolBase.clothing]
-    };
-
-    const pickWithPriority = (list) => {
-      if (!list || list.length === 0) return null;
-      
-      // Filter list to items not already selected by name
-      const available = list.filter(i => !selectedNames.has((i['상품명'] || '').toString().trim()));
-      if (available.length === 0) return null;
-
-      const cGender = customer.gender;
-      let picked = null;
-
-      if (cGender === '여아') {
-        const girls = available.filter(i => getProductGender(i) === 'G');
-        const unisex = available.filter(i => getProductGender(i) === 'U');
-        
-        // Sort both sub-pools by year
-        girls.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-        unisex.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-
-        if (girls.length > 0 && (Math.random() < 0.8 || unisex.length === 0)) {
-          girls.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-          const idx = Math.floor(Math.pow(Math.random(), 2) * girls.length);
-          picked = girls[idx];
-        } else if (unisex.length > 0) {
-          unisex.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-          const idx = Math.floor(Math.pow(Math.random(), 2) * unisex.length);
-          picked = unisex[idx];
-        }
-      } 
-      
-      if (!picked) {
-        available.sort((a, b) => getProductionYear(a) - getProductionYear(b));
-        const idx = Math.floor(Math.pow(Math.random(), 2) * available.length);
-        picked = available[idx];
+    const pickOldest = (list) => {
+      const avail = list.filter(i => !usedNames.has((i['상품명'] || '').toString().trim()));
+      if (avail.length === 0) return null;
+      let picked;
+      if (customer.gender === '여아') {
+        const g = avail.filter(i => getProductGender(i) === 'G');
+        picked = g.length > 0 ? g[0] : avail[0];
+      } else if (customer.gender === '남아') {
+        const b = avail.filter(i => getProductGender(i) === 'B');
+        picked = b.length > 0 ? b[0] : avail[0];
+      } else {
+        picked = avail[0];
       }
-
-      // Remove from the source list (not available)
-      const idx = list.indexOf(picked);
-      if (idx !== -1) list.splice(idx, 1);
-      
-      // Track name
-      selectedNames.add((picked['상품명'] || '').toString().trim());
-      
+      usedNames.add((picked['상품명'] || '').toString().trim());
       return picked;
     };
 
-    // Rule: Exactly 1 Shoe
-    const shoe = pickWithPriority(pool.shoes);
+    let selected = [];
+
+    // Shoe
+    const shoe = pickOldest(poolBase.shoes);
     if (shoe) selected.push(shoe);
 
-    // Rule: Exactly 1 Outer (Seasonal Priority)
-    let outerPool = pool.outer;
+    // Outer (season-prioritized)
+    let outerPool = [...poolBase.outer];
     if (season === '봄/가을') {
-      // Prioritize cardigans and jackets
-      const prioritized = outerPool.filter(i => {
-        const cat = getCategory(i);
-        return cat === 'outer-cardigan' || cat === 'outer-jacket' || cat === 'outer-vest';
-      });
-      if (prioritized.length > 0) outerPool = prioritized;
+      const p = outerPool.filter(i => ['outer-cardigan', 'outer-jacket', 'outer-vest'].includes(getCategory(i)));
+      if (p.length > 0) outerPool = p;
     } else if (season === '겨울') {
-      // Prioritize padding and coats
-      const prioritized = outerPool.filter(i => {
-        const cat = getCategory(i);
-        return cat === 'outer-jumper' || cat === 'outer-coat';
-      });
-      if (prioritized.length > 0) outerPool = prioritized;
+      const p = outerPool.filter(i => ['outer-jumper', 'outer-coat'].includes(getCategory(i)));
+      if (p.length > 0) outerPool = p;
     }
-    
-    const outer = pickWithPriority(outerPool);
-    if (outer) {
-      outer.isRecommendedOuter = true; // Flag for UI
-      selected.push(outer);
-      // Remove the selected outer from the main pool to avoid double picking
-      const mainIdx = pool.outer.findIndex(i => i['공급처상품명'] === outer['공급처상품명']);
-      if (mainIdx !== -1) pool.outer.splice(mainIdx, 1);
-    }
+    const outer = pickOldest(outerPool);
+    if (outer) { outer.isRecommendedOuter = true; selected.push(outer); }
 
-
-    // Rule: Clothing (Set or Top+Bottom)
-    const isSet = Math.random() > 0.5 && pool.set.length > 0;
-    if (isSet) {
-      const set = pickWithPriority(pool.set);
+    // Clothing: set or top+bottom
+    if (useSet && poolBase.set.length > 0) {
+      const set = pickOldest(poolBase.set);
       if (set) selected.push(set);
     } else {
-      const top = pickWithPriority(pool.top);
-      const bottom = pickWithPriority(pool.bottom);
+      const top = pickOldest(poolBase.top);
+      const bottom = pickOldest(poolBase.bottom);
       if (top) selected.push(top);
       if (bottom) selected.push(bottom);
     }
 
-    // Fill up to 7 items total if budget allows
-    const restPool = [...pool.top, ...pool.bottom, ...pool.clothing, ...pool.set];
-    while (selected.length < 7 && restPool.length > 0) {
-      const extra = pickWithPriority(restPool);
-      if (extra) {
-        const currentSum = selected.reduce((sum, item) => sum + (parseInt(item['원가']) || 0), 0) + (parseInt(extra['원가']) || 0);
-        if (currentSum <= 49000) {
-          selected.push(extra);
-        } else {
-          break;
-        }
-      } else {
-        // No more items can be picked (either pool empty or all remaining are duplicates)
-        break;
+    // Fill up to 7 items within budget
+    const rest = [...poolBase.top, ...poolBase.bottom, ...poolBase.clothing, ...poolBase.set]
+      .filter(i => !usedNames.has((i['상품명'] || '').toString().trim()));
+    for (const item of rest) {
+      if (selected.length >= 7) break;
+      const name = (item['상품명'] || '').toString().trim();
+      if (usedNames.has(name)) continue;
+      const sum = selected.reduce((s, i) => s + (parseInt(i['원가']) || 0), 0) + (parseInt(item['원가']) || 0);
+      if (sum <= 49000) {
+        selected.push(item);
+        usedNames.add(name);
       }
     }
 
+    const totalCost = selected.reduce((s, i) => s + (parseInt(i['원가']) || 0), 0);
+    return { items: selected, usedNames, totalCost };
+  };
 
-    const totalCost = selected.reduce((sum, item) => sum + (parseInt(item['원가']) || 0), 0);
-    const result = {
-      customerPhone: customer.phone,
-      customerName: customer.name,
-      items: selected,
-      totalCost,
-      isValidBudget: totalCost >= 43000 && totalCost <= 49000
-    };
+  // Try both paths, pick closer to 46,000원
+  const r1 = buildResult(false);
+  const r2 = buildResult(true);
+  const best = Math.abs(r1.totalCost - 46000) <= Math.abs(r2.totalCost - 46000) ? r1 : r2;
 
-    if (result.isValidBudget) return result;
-    if (!bestAttempt || Math.abs(totalCost - 46000) < Math.abs(bestAttempt.totalCost - 46000)) {
-      bestAttempt = result;
-    }
-  }
+  // Commit selected items to globalUsed so next customers skip them
+  best.usedNames.forEach(name => globalUsed.add(name));
 
-  return bestAttempt;
+  return {
+    customerPhone: customer.phone,
+    customerName: customer.name,
+    items: best.items,
+    totalCost: best.totalCost,
+    isValidBudget: best.totalCost >= 43000 && best.totalCost <= 49000
+  };
 }
 
 export function addExtraItem(customer, currentItems, inventory, historyMap, season, targetBigCat = null, targetSubCat = null, rejectedList = []) {
