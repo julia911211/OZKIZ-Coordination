@@ -1291,8 +1291,8 @@ if (customerDbSearch) {
   });
 }
 
-// Event delegation for regen button on resultsContainer
-resultsContainer.addEventListener('click', (e) => {
+// Event delegation for regen button
+document.addEventListener('click', (e) => {
   const btn = e.target.closest('.regen-card-btn');
   if (!btn) return;
   e.stopPropagation();
