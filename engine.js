@@ -158,7 +158,7 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
   return finalCandidates[idx];
 }
 
-export function coordinate(customer, inventory, historyMap, season = '봄/가을', globalUsed = new Set()) {
+export function coordinate(customer, inventory, historyMap, season = '봄/가을', globalUsed = new Set(), randomize = false) {
   const customerHistory = historyMap[customer.phone] || [];
 
   // 1. Gender Logic
@@ -246,16 +246,28 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
     const pickOldest = (list) => {
       const avail = list.filter(i => !usedNames.has((i['상품명'] || '').toString().trim()));
       if (avail.length === 0) return null;
+
+      const pickFrom = (pool) => {
+        if (pool.length === 0) return null;
+        if (randomize) {
+          // 랜덤 재생성: 오래된 상위 절반 중 랜덤 선택
+          const topN = Math.max(1, Math.ceil(pool.length / 2));
+          return pool[Math.floor(Math.random() * topN)];
+        }
+        return pool[0];
+      };
+
       let picked;
       if (customer.gender === '여아') {
         const g = avail.filter(i => getProductGender(i) === 'G');
-        picked = g.length > 0 ? g[0] : avail[0];
+        picked = pickFrom(g.length > 0 ? g : avail);
       } else if (customer.gender === '남아') {
         const b = avail.filter(i => getProductGender(i) === 'B');
-        picked = b.length > 0 ? b[0] : avail[0];
+        picked = pickFrom(b.length > 0 ? b : avail);
       } else {
-        picked = avail[0];
+        picked = pickFrom(avail);
       }
+      if (!picked) return null;
       usedNames.add((picked['상품명'] || '').toString().trim());
       return picked;
     };
