@@ -1091,6 +1091,7 @@ function renderCustomerList(customers, resultsMap = null) {
     if (regenBtn) {
       regenBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        e.target.textContent = '⏳';
         const localGlobalUsed = new Set();
         lastCoordResults.forEach(r => {
           if (r.customerPhone !== c.phone) {
