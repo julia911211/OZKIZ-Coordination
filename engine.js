@@ -301,17 +301,21 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
       if (bottom) selected.push(bottom);
     }
 
-    // Fill up to 7 items within budget
+    // Fill up to 7 items within budget (복종 중복 방지)
+    const usedSubCats = new Set(selected.map(i => (i['복종'] || '').toString().trim()));
     const rest = [...poolBase.top, ...poolBase.bottom, ...poolBase.clothing, ...poolBase.set]
       .filter(i => !usedNames.has((i['상품명'] || '').toString().trim()));
     for (const item of rest) {
       if (selected.length >= 7) break;
       const name = (item['상품명'] || '').toString().trim();
+      const subCat = (item['복종'] || '').toString().trim();
       if (usedNames.has(name)) continue;
+      if (usedSubCats.has(subCat)) continue; // 같은 복종 중복 제외
       const sum = selected.reduce((s, i) => s + (parseInt(i['원가']) || 0), 0) + (parseInt(item['원가']) || 0);
       if (sum <= 49000) {
         selected.push(item);
         usedNames.add(name);
+        usedSubCats.add(subCat);
       }
     }
 
