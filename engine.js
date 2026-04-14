@@ -68,19 +68,26 @@ export const getItemSeason = (item) => {
 const getProductionYear = (item) => {
   const code = (item['공급처상품명'] || '').toString().trim();
   if (code.length < 2) return 2099; // Unknown
-  
-  const char12 = code.substring(1, 3);
-  const year25 = parseInt(char12);
-  
-  // Rule: If starts with 25 or higher, it's 2025+
-  if (!isNaN(year25) && year25 >= 25 && year25 <= 99) {
-    return 2000 + year25;
+
+  // 2025+ new format: positions 1-2 are both digits AND form a year in [25, currentYear]
+  // e.g. O25SF13G → '25' → 2025
+  // This disambiguates from old format e.g. O33P18G → '33' > currentYear(26) → old format → 2023
+  if (code.length >= 3) {
+    const twoDigit = code.substring(1, 3);
+    if (/^\d{2}$/.test(twoDigit)) {
+      const num = parseInt(twoDigit);
+      const currentYearShort = new Date().getFullYear() - 2000;
+      if (num >= 25 && num <= currentYearShort) {
+        return 2000 + num;
+      }
+    }
   }
-  
-  // Else use the single digit rule
+
+  // Old format (2015-2024): position 1 = last digit of year, position 2 = season code (ignored)
+  // e.g. O13F15G → '1' → 2021, O33P18G → '3' → 2023
   const digit = parseInt(code.charAt(1));
   if (isNaN(digit)) return 2099;
-  
+
   // 5-9: 2015-2019, 0-4: 2020-2024
   if (digit >= 5) return 2010 + digit;
   return 2020 + digit;
@@ -153,9 +160,13 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
   // Sort oldest first
   finalCandidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
 
+  // 2023년 이전 제품 우선 사용
+  const oldCandidates = finalCandidates.filter(i => getProductionYear(i) < 2023);
+  const workPool = oldCandidates.length > 0 ? oldCandidates : finalCandidates;
+
   // Weighted probability selection (FIFO biased but full coverage)
-  const idx = Math.floor(Math.pow(Math.random(), 2) * finalCandidates.length);
-  return finalCandidates[idx];
+  const idx = Math.floor(Math.pow(Math.random(), 2) * workPool.length);
+  return workPool[idx];
 }
 
 export function coordinate(customer, inventory, historyMap, season = '봄/가을', globalUsed = new Set(), randomize = false) {
@@ -249,12 +260,15 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
 
       const pickFrom = (pool) => {
         if (pool.length === 0) return null;
+        // 2023년 이전 제품 우선 사용 (재고 소진 목적)
+        const oldPool = pool.filter(i => getProductionYear(i) < 2023);
+        const workPool = oldPool.length > 0 ? oldPool : pool;
         if (randomize) {
           // 랜덤 재생성: 오래된 상위 20% 중 랜덤 선택 (오래된 제품 우선)
-          const topN = Math.max(1, Math.ceil(pool.length * 0.2));
-          return pool[Math.floor(Math.random() * topN)];
+          const topN = Math.max(1, Math.ceil(workPool.length * 0.2));
+          return workPool[Math.floor(Math.random() * topN)];
         }
-        return pool[0];
+        return workPool[0];
       };
 
       let picked;
@@ -399,7 +413,11 @@ export function addExtraItem(customer, currentItems, inventory, historyMap, seas
   // Sort oldest first
   finalCandidates.sort((a, b) => getProductionYear(a) - getProductionYear(b));
 
+  // 2023년 이전 제품 우선 사용
+  const oldCandidates2 = finalCandidates.filter(i => getProductionYear(i) < 2023);
+  const workPool2 = oldCandidates2.length > 0 ? oldCandidates2 : finalCandidates;
+
   // Weighted probability selection (FIFO biased but full coverage)
-  const idx = Math.floor(Math.pow(Math.random(), 2) * finalCandidates.length);
-  return finalCandidates[idx];
+  const idx = Math.floor(Math.pow(Math.random(), 2) * workPool2.length);
+  return workPool2[idx];
 }
