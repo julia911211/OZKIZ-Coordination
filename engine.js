@@ -61,10 +61,13 @@ export const getItemSeason = (item) => {
  */
 const getPreferenceScore = (item, preference) => {
   if (!preference || preference === '없음') return 0;
+  // 옵션 컬럼의 색상 앞 콜론 제거 (":베이지,:140" → "베이지 140")
+  const optionText = (item['옵션'] || '').toString().replace(/:/g, ' ');
   const itemText = (
     (item['상품명'] || '') + ' ' +
     (item['복종'] || '') + ' ' +
-    (item['복종(대카테고리)'] || '')
+    (item['복종(대카테고리)'] || '') + ' ' +
+    optionText
   ).toLowerCase();
   const keywords = preference
     .replace(/[*\n,]/g, ' ')
