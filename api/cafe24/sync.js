@@ -68,37 +68,58 @@ async function getAccessToken(supabase) {
   return newTokens.access_token;
 }
 
-// 카페24에서 활성 구독 목록 전체 가져오기 (페이지네이션 처리)
-async function fetchAllSubscriptions(accessToken) {
-  const results = [];
-  let offset = 0;
-  const limit = 100;
-
-  while (true) {
-    const res = await fetch(
-      `https://${MALL_ID}.cafe24api.com/api/v2/admin/subscriptions?limit=${limit}&offset=${offset}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'X-Cafe24-Api-Version': '2024-09-01',
-        },
-      }
-    );
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`구독 목록 조회 실패: ${errText}`);
+// 카페24 API 호출 헬퍼
+async function cafe24Get(accessToken, path) {
+  const res = await fetch(
+    `https://${MALL_ID}.cafe24api.com/api/v2/admin/${path}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'X-Cafe24-Api-Version': '2024-09-01',
+      },
     }
+  );
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  return { status: res.status, ok: res.ok, data: json };
+}
 
-    const data = await res.json();
-    const subs = data.subscriptions || [];
-    results.push(...subs);
+// 카페24에서 활성 구독 목록 전체 가져오기
+async function fetchAllSubscriptions(accessToken) {
+  // 후보 엔드포인트 순서대로 시도
+  const candidates = [
+    'subscriptions',
+    'recurringorders',
+    'billingkeys',
+  ];
 
-    if (subs.length < limit) break;
-    offset += limit;
+  for (const endpoint of candidates) {
+    const { status, ok, data } = await cafe24Get(accessToken, `${endpoint}?limit=10`);
+    console.log(`[탐색] ${endpoint} → ${status}`, JSON.stringify(data).slice(0, 200));
+    if (ok) {
+      // 성공한 엔드포인트로 전체 페이지 수집
+      const results = [];
+      let offset = 0;
+      const limit = 100;
+      const rootKey = Object.keys(data).find(k => Array.isArray(data[k]));
+      if (!rootKey) return [];
+
+      results.push(...data[rootKey]);
+      while (data[rootKey].length === 10) {
+        offset += 10;
+        const next = await cafe24Get(accessToken, `${endpoint}?limit=${limit}&offset=${offset}`);
+        if (!next.ok) break;
+        const items = next.data[rootKey] || [];
+        results.push(...items);
+        if (items.length < limit) break;
+      }
+      console.log(`[사용] ${endpoint}, 총 ${results.length}건`);
+      return results;
+    }
   }
 
-  return results;
+  throw new Error('구독 관련 API를 찾을 수 없습니다. Vercel 함수 로그를 확인해주세요.');
 }
 
 export default async function handler(req, res) {
