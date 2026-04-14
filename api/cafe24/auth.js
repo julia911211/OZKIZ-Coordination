@@ -7,7 +7,7 @@ export default function handler(req, res) {
   const redirectUri = 'https://v0-static-html-upload.vercel.app/api/cafe24/callback';
 
   const scope = [
-    'mall.read_member',
+    'mall.read_customer',
     'mall.read_order',
   ].join(',');
 
