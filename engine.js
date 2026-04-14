@@ -56,6 +56,24 @@ export const getItemSeason = (item) => {
 };
 
 /**
+ * Score an inventory item against a customer's preference text.
+ * Returns the number of matched keywords (higher = better match).
+ */
+const getPreferenceScore = (item, preference) => {
+  if (!preference || preference === '없음') return 0;
+  const itemText = (
+    (item['상품명'] || '') + ' ' +
+    (item['복종'] || '') + ' ' +
+    (item['복종(대카테고리)'] || '')
+  ).toLowerCase();
+  const keywords = preference
+    .replace(/[*\n,]/g, ' ')
+    .split(/\s+/)
+    .filter(k => k.length >= 2);
+  return keywords.reduce((score, kw) => score + (itemText.includes(kw.toLowerCase()) ? 1 : 0), 0);
+};
+
+/**
  * Replace a single item in the coordination with another from the same category.
  * @param {object} customer - Customer object (for gender/size).
  * @param {object} currentItem - The item to replace.
@@ -164,6 +182,18 @@ export function regenItem(customer, currentItem, currentItems, inventory, histor
   const oldCandidates = finalCandidates.filter(i => getProductionYear(i) < 2023);
   const workPool = oldCandidates.length > 0 ? oldCandidates : finalCandidates;
 
+  // 취향 키워드 매칭 우선
+  const pref = (customer.preference || '').replace(/없음/g, '').trim();
+  if (pref) {
+    const scored = workPool.map(i => ({ item: i, score: getPreferenceScore(i, pref) }));
+    const maxScore = Math.max(...scored.map(x => x.score));
+    if (maxScore > 0) {
+      const topMatches = scored.filter(x => x.score === maxScore).map(x => x.item);
+      const idx2 = Math.floor(Math.pow(Math.random(), 2) * topMatches.length);
+      return topMatches[idx2];
+    }
+  }
+
   // Weighted probability selection (FIFO biased but full coverage)
   const idx = Math.floor(Math.pow(Math.random(), 2) * workPool.length);
   return workPool[idx];
@@ -263,6 +293,19 @@ export function coordinate(customer, inventory, historyMap, season = '봄/가을
         // 2023년 이전 제품 우선 사용 (재고 소진 목적)
         const oldPool = pool.filter(i => getProductionYear(i) < 2023);
         const workPool = oldPool.length > 0 ? oldPool : pool;
+
+        // 취향 키워드 매칭 우선
+        const pref = (customer.preference || '').replace(/없음/g, '').trim();
+        if (pref) {
+          const scored = workPool.map(i => ({ item: i, score: getPreferenceScore(i, pref) }));
+          const maxScore = Math.max(...scored.map(x => x.score));
+          if (maxScore > 0) {
+            const topMatches = scored.filter(x => x.score === maxScore).map(x => x.item);
+            if (randomize) return topMatches[Math.floor(Math.random() * topMatches.length)];
+            return topMatches[0];
+          }
+        }
+
         if (randomize) {
           // 랜덤 재생성: 오래된 상위 20% 중 랜덤 선택 (오래된 제품 우선)
           const topN = Math.max(1, Math.ceil(workPool.length * 0.2));
@@ -416,6 +459,18 @@ export function addExtraItem(customer, currentItems, inventory, historyMap, seas
   // 2023년 이전 제품 우선 사용
   const oldCandidates2 = finalCandidates.filter(i => getProductionYear(i) < 2023);
   const workPool2 = oldCandidates2.length > 0 ? oldCandidates2 : finalCandidates;
+
+  // 취향 키워드 매칭 우선
+  const pref2 = (customer.preference || '').replace(/없음/g, '').trim();
+  if (pref2) {
+    const scored2 = workPool2.map(i => ({ item: i, score: getPreferenceScore(i, pref2) }));
+    const maxScore2 = Math.max(...scored2.map(x => x.score));
+    if (maxScore2 > 0) {
+      const topMatches2 = scored2.filter(x => x.score === maxScore2).map(x => x.item);
+      const idx3 = Math.floor(Math.pow(Math.random(), 2) * topMatches2.length);
+      return topMatches2[idx3];
+    }
+  }
 
   // Weighted probability selection (FIFO biased but full coverage)
   const idx = Math.floor(Math.pow(Math.random(), 2) * workPool2.length);
