@@ -43,6 +43,7 @@ export default async function handler(req, res) {
     }
 
     const tokens = await tokenRes.json();
+    console.log('카페24 토큰 응답:', JSON.stringify(tokens));
 
     // 2. Supabase에 토큰 저장
     const supabase = createClient(
@@ -50,7 +51,16 @@ export default async function handler(req, res) {
       process.env.SUPABASE_SERVICE_KEY
     );
 
-    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+    // expires_in(초) 또는 expires_at(날짜문자열) 모두 처리
+    let expiresAt;
+    if (tokens.expires_in && !isNaN(Number(tokens.expires_in))) {
+      expiresAt = new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString();
+    } else if (tokens.expires_at) {
+      expiresAt = new Date(tokens.expires_at).toISOString();
+    } else {
+      // 기본값: 2시간 후
+      expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    }
 
     const { error: dbError } = await supabase
       .from('cafe24_tokens')
