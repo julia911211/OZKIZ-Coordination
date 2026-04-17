@@ -33,13 +33,16 @@ export default async function handler(req, res) {
   try {
     const token = await getAccessToken();
 
+    // 최근 90일 날짜 범위
+    const endDate = new Date().toISOString().slice(0, 10);
+    const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const dateRange = `start_date=${startDate}&end_date=${endDate}`;
+
     const endpoints = [
-      'orders?limit=2',
-      'orders?limit=2&order_type=subscription',
-      'orders?limit=2&order_type=recurring',
-      'customers?limit=2',
-      'subscriptions?limit=2',
-      'billingkeys?limit=2',
+      `orders?limit=2&${dateRange}`,
+      `orders?limit=2&order_type=subscription&${dateRange}`,
+      `orders?limit=2&order_type=recurring&${dateRange}`,
+      `orders?limit=2&order_type=norder&${dateRange}`,
     ];
 
     const results = {};
