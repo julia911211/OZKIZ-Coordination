@@ -75,7 +75,7 @@ async function cafe24Get(accessToken, path) {
     {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'X-Cafe24-Api-Version': '2024-09-01',
+        'X-Cafe24-Api-Version': '2026-03-01',
       },
     }
   );

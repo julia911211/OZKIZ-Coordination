@@ -17,7 +17,7 @@ async function tryEndpoint(token, path) {
     const res = await fetch(`https://${MALL_ID}.cafe24api.com/api/v2/admin/${path}`, {
       headers: {
         'Authorization': `Bearer ${token}`,
-        'X-Cafe24-Api-Version': '2024-09-01',
+        'X-Cafe24-Api-Version': '2026-03-01',
       },
     });
     const text = await res.text();
@@ -34,14 +34,12 @@ export default async function handler(req, res) {
     const token = await getAccessToken();
 
     const endpoints = [
-      'subscriptions?limit=3',
-      'recurringorders?limit=3',
-      'billingkeys?limit=3',
-      'orders?limit=3',
-      'orders?limit=3&order_type=subscription',
-      'orders?limit=3&order_type=recurring',
-      'members?limit=3',
-      'customers?limit=3',
+      'orders?limit=2',
+      'orders?limit=2&order_type=subscription',
+      'orders?limit=2&order_type=recurring',
+      'customers?limit=2',
+      'subscriptions?limit=2',
+      'billingkeys?limit=2',
     ];
 
     const results = {};
