@@ -678,7 +678,7 @@ function renderCustomerTable(customers) {
       <td>매월 ${c.payDay}일</td>
       <td>${c.childCount}명</td>
       <td>
-        <button onclick="deleteCustomer('${c.phone}', '${c.regId}')" style="background:none;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;color:#94a3b8;cursor:pointer;" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#94a3b8'">삭제</button>
+        <button onclick="deleteCustomer('${c.phone}')" style="background:none;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;color:#94a3b8;cursor:pointer;" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#94a3b8'">삭제</button>
       </td>
     `;
     tableBody.appendChild(tr);
@@ -686,12 +686,14 @@ function renderCustomerTable(customers) {
 }
 
 // ─── 고객 삭제 ────────────────────────────────────────────────────────────────
-function deleteCustomer(phone, regId) {
+function deleteCustomer(phone) {
   if (!confirm('이 고객을 삭제하시겠습니까?')) return;
-  currentCustomers = currentCustomers.filter(c => !(c.phone === phone && c.regId === regId));
+  currentCustomers = currentCustomers.filter(c => c.phone !== phone);
   saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
-  supabase.from('customers').delete().eq('reg_id', regId).then(() => {});
-  renderCustomerList(currentCustomers, lastCoordResults);
+  supabase.from('customers').delete().eq('phone', phone).then(({ error }) => {
+    if (error) console.error('고객 삭제 실패:', error);
+  });
+  renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
   document.getElementById('total-customers').textContent = currentCustomers.length;
 }
 
