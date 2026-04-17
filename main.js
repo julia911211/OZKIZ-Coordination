@@ -696,6 +696,7 @@ function deleteCustomer(phone) {
   renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
   document.getElementById('total-customers').textContent = currentCustomers.length;
 }
+window.deleteCustomer = deleteCustomer;
 
 // ─── 고객 추가 모달 ───────────────────────────────────────────────────────────
 function openAddCustomerModal() {
