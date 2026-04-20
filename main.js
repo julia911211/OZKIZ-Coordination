@@ -755,11 +755,14 @@ function field(label, id, placeholder) {
   return `<div><label style="${labelStyle}">${label}</label><input id="${id}" placeholder="${placeholder}" style="${inputStyle}" /></div>`;
 }
 
-function confirmAddCustomer() {
+async function confirmAddCustomer() {
   const get = id => document.getElementById(id)?.value.trim() || '';
   const name = get('new-name');
   const phone = get('new-phone');
   if (!name || !phone) { alert('이름과 연락처는 필수입니다.'); return; }
+
+  const toNullable = v => (v && v !== '-') ? v : null;
+  const toIntOrNull = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
 
   const newCustomer = {
     regId: get('new-regId') || '-',
@@ -767,9 +770,9 @@ function confirmAddCustomer() {
     phone: normalizePhone(phone),
     displayPhone: phone,
     gender: get('new-gender') || '여아',
-    clothSize: get('new-clothSize') || '-',
-    shoeSize: get('new-shoeSize') || '-',
-    payDay: get('new-payDay') || '-',
+    clothSize: toNullable(get('new-clothSize')) || '-',
+    shoeSize: toNullable(get('new-shoeSize')) || '-',
+    payDay: toNullable(get('new-payDay')) || '-',
     childCount: parseInt(get('new-childCount')) || 1,
     preference: get('new-preference') || '없음',
   };
@@ -778,17 +781,22 @@ function confirmAddCustomer() {
   saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
 
   // Supabase 저장
-  supabase.from('customers').insert({
+  const { error } = await supabase.from('customers').insert({
     phone: newCustomer.phone,
     name: newCustomer.name,
-    reg_id: newCustomer.regId,
-    gender: newCustomer.gender,
-    cloth_size: newCustomer.clothSize,
-    shoe_size: newCustomer.shoeSize,
-    pay_day: newCustomer.payDay,
+    reg_id: newCustomer.regId === '-' ? null : newCustomer.regId,
+    gender: toNullable(newCustomer.gender),
+    cloth_size: toNullable(newCustomer.clothSize),
+    shoe_size: toNullable(newCustomer.shoeSize),
+    pay_day: toIntOrNull(newCustomer.payDay),
     child_count: newCustomer.childCount,
-    preference: newCustomer.preference
-  }).then(({ error }) => { if (error) console.warn('Supabase 저장 실패:', error.message); });
+    preference: newCustomer.preference,
+  });
+  if (error) {
+    console.warn('Supabase 저장 실패:', error.message);
+    alert(`저장 중 오류가 발생했습니다: ${error.message}`);
+    return;
+  }
 
   document.getElementById('add-customer-modal').remove();
   renderCustomerList(currentCustomers, lastCoordResults);
@@ -846,7 +854,7 @@ function openEditCustomerModal(phone) {
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 }
 
-function confirmEditCustomer(originalPhone) {
+async function confirmEditCustomer(originalPhone) {
   const get = id => document.getElementById(id)?.value.trim() || '';
   const name = get('edit-name');
   const newPhone = normalizePhone(get('edit-phone'));
@@ -869,20 +877,25 @@ function confirmEditCustomer(originalPhone) {
   if (idx !== -1) currentCustomers[idx] = { ...currentCustomers[idx], ...updated };
   saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
 
+  const toNullableE = v => (v && v !== '-') ? v : null;
+  const toIntOrNullE = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
+
   // Supabase 업데이트
-  supabase.from('customers').update({
+  const { error: updateError } = await supabase.from('customers').update({
     phone: updated.phone,
     name: updated.name,
-    reg_id: updated.regId,
-    gender: updated.gender,
-    cloth_size: updated.clothSize,
-    shoe_size: updated.shoeSize,
-    pay_day: updated.payDay,
+    reg_id: updated.regId === '-' ? null : updated.regId,
+    gender: toNullableE(updated.gender),
+    cloth_size: toNullableE(updated.clothSize),
+    shoe_size: toNullableE(updated.shoeSize),
+    pay_day: toIntOrNullE(updated.payDay),
     child_count: updated.childCount,
     preference: updated.preference,
-  }).eq('phone', originalPhone).then(({ error }) => {
-    if (error) console.warn('Supabase 수정 실패:', error.message);
-  });
+  }).eq('phone', originalPhone);
+  if (updateError) {
+    alert(`저장 중 오류: ${updateError.message}`);
+    return;
+  }
 
   document.getElementById('edit-customer-modal').remove();
   renderCustomerList(currentCustomers, lastCoordResults);
