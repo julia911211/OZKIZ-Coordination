@@ -238,6 +238,9 @@ export default async function handler(req, res) {
 
       const payDay = extractPayDay(status.createdDate);
 
+      const zipcode = s.receiver_zipcode || s.buyer_zipcode || null;
+      const address = [s.receiver_address || s.buyer_address1 || '', s.receiver_address_detail || s.buyer_address2 || ''].filter(Boolean).join(' ') || null;
+
       newCustomers.push({
         reg_id: status.subscriptionId,
         name,
@@ -248,6 +251,8 @@ export default async function handler(req, res) {
         pay_day: payDay,
         child_count: totalQty || 1,
         preference: '없음',
+        zipcode,
+        address,
       });
       existingPhoneSet.add(phone);
     }

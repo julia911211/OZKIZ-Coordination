@@ -130,7 +130,9 @@ function mapCustomers(custData) {
     shoeSize: c.shoe_size,
     payDay: c.pay_day,
     childCount: c.child_count,
-    preference: c.preference
+    preference: c.preference,
+    zipcode: c.zipcode || '',
+    address: c.address || '',
   }));
 }
 
@@ -729,6 +731,8 @@ function renderCustomerTable(customers) {
       <td style="color:var(--primary); font-weight:600; cursor:pointer; text-decoration:underline;" onclick="openEditCustomerModal('${c.phone}')" title="클릭하여 수정">${c.regId || '-'}</td>
       <td style="font-weight:700;">${c.name}</td>
       <td>${formatPhone(c.displayPhone || c.phone)}</td>
+      <td>${c.zipcode || '-'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${c.address || ''}">${c.address || '-'}</td>
       <td><span class="badge ${c.gender === '여아' ? 'pink' : (c.gender === '남아' ? 'blue' : '')}">${c.gender}</span></td>
       <td>${c.clothSize}</td>
       <td>${c.shoeSize}</td>
@@ -781,8 +785,13 @@ function openAddCustomerModal() {
         ${field('슈즈 사이즈', 'new-shoeSize', '예: 180')}
         ${field('정기결제일 (일)', 'new-payDay', '예: 15')}
         ${field('아이 수', 'new-childCount', '예: 1')}
+        ${field('우편번호', 'new-zipcode', '예: 05794')}
       </div>
-      <div style="margin-top:1rem;">
+      <div style="margin-top:0.75rem;">
+        <label style="${labelStyle}">주소</label>
+        <input id="new-address" placeholder="예: 서울 송파구 문정로 83" style="${inputStyle}" />
+      </div>
+      <div style="margin-top:0.75rem;">
         <label style="${labelStyle}">취향/메모</label>
         <textarea id="new-preference" placeholder="예: 핑크색 선호, 캐주얼 스타일" style="${inputStyle}height:80px;resize:vertical;"></textarea>
       </div>
@@ -828,6 +837,8 @@ async function saveCustomerToSupabase(row) {
     pay_day: toI(row.payDay),
     child_count: row.childCount || 1,
     preference: row.preference || '없음',
+    zipcode: row.zipcode || null,
+    address: row.address || null,
   };
   const { error } = await supabase.from('customers').upsert(payload, { onConflict: 'phone' });
   if (error) console.error('Supabase 저장 오류 상세:', JSON.stringify(error));
@@ -853,6 +864,8 @@ async function confirmAddCustomer() {
     payDay: toNullable(get('new-payDay')) || '-',
     childCount: parseInt(get('new-childCount')) || 1,
     preference: get('new-preference') || '없음',
+    zipcode: get('new-zipcode') || '',
+    address: get('new-address') || '',
   };
 
   // 1. 즉시 로컬 저장
@@ -906,8 +919,13 @@ function openEditCustomerModal(phone) {
         ${eField('슈즈 사이즈', 'shoeSize', c.shoeSize === '-' ? '' : c.shoeSize, '180')}
         ${eField('정기결제일 (일)', 'payDay', c.payDay === '-' ? '' : c.payDay, '15')}
         ${eField('아이 수', 'childCount', c.childCount, '1')}
+        ${eField('우편번호', 'zipcode', c.zipcode || '', '05794')}
       </div>
-      <div style="margin-top:1rem;">
+      <div style="margin-top:0.75rem;">
+        <label style="${labelStyle}">주소</label>
+        <input id="edit-address" value="${c.address || ''}" placeholder="예: 서울 송파구 문정로 83" style="${inputStyle}" />
+      </div>
+      <div style="margin-top:0.75rem;">
         <label style="${labelStyle}">취향/메모</label>
         <textarea id="edit-preference" style="${inputStyle}height:80px;resize:vertical;">${c.preference && c.preference !== '없음' ? c.preference : ''}</textarea>
       </div>
@@ -938,6 +956,8 @@ async function confirmEditCustomer(originalPhone) {
     payDay: get('edit-payDay') || '-',
     childCount: parseInt(get('edit-childCount')) || 1,
     preference: get('edit-preference') || '없음',
+    zipcode: get('edit-zipcode') || '',
+    address: get('edit-address') || '',
   };
 
   const idx = currentCustomers.findIndex(c => c.phone === originalPhone);
