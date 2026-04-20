@@ -1,4 +1,5 @@
 // 카페24 정기구독 고객 동기화
+// - subscription/shipments API 사용 (정기배송 신청 내역)
 // - Vercel 크론이 매일 오전 10시(KST) 자동 실행
 // - 수동 실행: https://v0-static-html-upload.vercel.app/api/cafe24/sync
 
@@ -86,11 +87,8 @@ async function cafe24Get(accessToken, path) {
   return { status: res.status, ok: res.ok, data: json };
 }
 
-// 최근 35일 주문 중 subscription:"T" 인 것만 수집 (페이지네이션)
-async function fetchSubscriptionOrders(accessToken) {
-  const endDate = new Date().toISOString().slice(0, 10);
-  const startDate = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
+// 특정 기간의 정기배송 신청 내역 수집 (페이지네이션)
+async function fetchShipmentsForRange(accessToken, startDate, endDate) {
   const results = [];
   let offset = 0;
   const limit = 100;
@@ -98,31 +96,42 @@ async function fetchSubscriptionOrders(accessToken) {
   while (true) {
     const { ok, data } = await cafe24Get(
       accessToken,
-      `orders?limit=${limit}&offset=${offset}&start_date=${startDate}&end_date=${endDate}&paid=T&canceled=F`
+      `subscription/shipments?limit=${limit}&offset=${offset}&start_date=${startDate}&end_date=${endDate}`
     );
     if (!ok) break;
 
-    const orders = data.orders || [];
-    // subscription: "T" 인 주문만 필터
-    const subOrders = orders.filter(o => o.subscription === 'T');
-    results.push(...subOrders);
+    const shipments = data.shipments || [];
+    results.push(...shipments);
 
-    if (orders.length < limit) break;
+    if (shipments.length < limit) break;
     offset += limit;
   }
 
   return results;
 }
 
-// member_id로 카페24 회원 전화번호 조회
-async function fetchMemberPhone(accessToken, memberId) {
-  const { ok, data } = await cafe24Get(accessToken, `customers?member_id=${encodeURIComponent(memberId)}`);
-  if (!ok || !data.customers || data.customers.length === 0) return null;
-  const c = data.customers[0];
-  return {
-    phone: normalizePhone(c.cellphone || c.phone || ''),
-    name: c.name || c.billing_name || '',
-  };
+// 서비스 시작(2020-01-01)부터 오늘까지 연도별로 나눠 전체 수집
+async function fetchAllSubscriptionShipments(accessToken) {
+  const allShipments = [];
+  const today = new Date();
+  const serviceStartYear = 2020;
+
+  // 연도별로 최대 1년 단위로 쪼개서 요청
+  for (let year = serviceStartYear; year <= today.getFullYear(); year++) {
+    const startDate = `${year}-01-01`;
+    const rawEnd = new Date(year + 1, 0, 0); // 해당 연도 마지막 날
+    const endDate = rawEnd > today
+      ? today.toISOString().slice(0, 10)
+      : rawEnd.toISOString().slice(0, 10);
+
+    const shipments = await fetchShipmentsForRange(accessToken, startDate, endDate);
+    allShipments.push(...shipments);
+
+    // 올해면 더 이상 루프 불필요
+    if (year === today.getFullYear()) break;
+  }
+
+  return allShipments;
 }
 
 export default async function handler(req, res) {
@@ -135,23 +144,55 @@ export default async function handler(req, res) {
     // 1. 토큰 준비
     const accessToken = await getAccessToken(supabase);
 
-    // 2. 최근 35일 정기결제 주문 수집
-    const subOrders = await fetchSubscriptionOrders(accessToken);
+    // 2. 전체 기간 정기배송 신청 내역 수집
+    const allShipments = await fetchAllSubscriptionShipments(accessToken);
 
-    // member_id 기준 중복 제거 (한 명이 여러 주문 있을 수 있음)
-    const memberMap = {};
-    for (const o of subOrders) {
-      if (o.member_id && !memberMap[o.member_id]) {
-        memberMap[o.member_id] = {
-          member_id: o.member_id,
-          name: o.billing_name || '',
-          email: o.member_email || '',
+    // 3. subscription_id 기준 중복 제거 후 전화번호 맵 구성
+    //    (한 고객이 여러 회차 배송 내역 가질 수 있음)
+    const phoneMap = {};
+    const cancelledPhones = new Set();
+
+    for (const s of allShipments) {
+      const phone = normalizePhone(s.buyer_cellphone || s.receiver_cellphone || '');
+      if (!phone) continue;
+
+      const isTerminated = !!s.terminated_date;
+      const state = s.subscription_state || '';
+
+      if (isTerminated) {
+        cancelledPhones.add(phone);
+      }
+
+      if (!phoneMap[phone]) {
+        phoneMap[phone] = {
+          phone,
+          name: s.buyer_name || s.receiver_name || '',
+          member_id: s.member_id || '',
+          subscription_id: s.subscription_id || '',
+          terminated: isTerminated,
+          state,
         };
+      } else {
+        // 해지 안 된 배송 내역이 있으면 활성으로 업데이트
+        if (!isTerminated) {
+          phoneMap[phone].terminated = false;
+        }
       }
     }
-    const uniqueMembers = Object.values(memberMap);
 
-    // 3. Supabase 기존 고객 phone 목록
+    // 해지 여부 최종 정리 (어느 시점에든 활성 내역 있으면 활성)
+    for (const phone of Object.keys(phoneMap)) {
+      phoneMap[phone].isActive = !cancelledPhones.has(phone) ||
+        allShipments.some(s =>
+          normalizePhone(s.buyer_cellphone || s.receiver_cellphone || '') === phone &&
+          !s.terminated_date
+        );
+    }
+
+    const allSubscribers = Object.values(phoneMap);
+    const activeSubscribers = allSubscribers.filter(s => s.isActive);
+
+    // 4. Supabase 기존 고객 phone 목록
     const { data: existingCustomers, error: custError } = await supabase
       .from('customers')
       .select('phone');
@@ -161,19 +202,14 @@ export default async function handler(req, res) {
       (existingCustomers || []).map(c => normalizePhone(c.phone))
     );
 
-    // 4. 신규 구독자 추가
+    // 5. 신규 활성 구독자만 추가
     const newCustomers = [];
-    for (const member of uniqueMembers) {
-      // 전화번호 조회
-      const info = await fetchMemberPhone(accessToken, member.member_id);
-      const phone = info?.phone || '';
-      const name = info?.name || member.name;
-
-      if (!phone || existingPhones.has(phone)) continue;
+    for (const sub of activeSubscribers) {
+      if (!sub.phone || existingPhones.has(sub.phone)) continue;
 
       newCustomers.push({
-        name,
-        phone,
+        name: sub.name,
+        phone: sub.phone,
         gender: null,
         cloth_size: null,
         shoe_size: null,
@@ -181,7 +217,7 @@ export default async function handler(req, res) {
         child_count: 1,
         preference: '없음',
       });
-      existingPhones.add(phone);
+      existingPhones.add(sub.phone);
     }
 
     let addedCount = 0;
@@ -193,12 +229,20 @@ export default async function handler(req, res) {
       addedCount = newCustomers.length;
     }
 
+    // 6. 해지자 목록 (DB에 있는데 해지된 경우)
+    const cancelledInDb = allSubscribers
+      .filter(s => !s.isActive && existingPhones.has(s.phone))
+      .map(s => ({ name: s.name, phone: s.phone }));
+
     const result = {
       success: true,
-      subscription_orders_found: subOrders.length,
-      unique_subscribers: uniqueMembers.length,
+      total_shipment_records: allShipments.length,
+      unique_subscribers: allSubscribers.length,
+      active_subscribers: activeSubscribers.length,
+      cancelled_subscribers: allSubscribers.length - activeSubscribers.length,
       new_added: addedCount,
       new_customers: newCustomers.map(c => ({ name: c.name, phone: c.phone })),
+      cancelled_in_db: cancelledInDb,
       synced_at: new Date().toISOString(),
     };
 
