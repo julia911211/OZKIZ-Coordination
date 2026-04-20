@@ -1533,10 +1533,9 @@ document.getElementById('add-customer-btn')?.addEventListener('click', openAddCu
 function updateCsvBtn() {
   const btn = document.getElementById('csv-download-btn');
   if (!btn) return;
-  btn.style.display = sessionConfirmed.length > 0 ? 'inline-block' : 'none';
-  btn.textContent = `⬇️ 발주 CSV (${sessionConfirmed.length}명)`;
+  btn.textContent = sessionConfirmed.length > 0 ? `⬇️ 발주 CSV (${sessionConfirmed.length}명)` : '⬇️ 발주 CSV';
 }
-updateCsvBtn(); // 초기 상태 반영
+updateCsvBtn();
 
 document.getElementById('csv-download-btn')?.addEventListener('click', async () => {
   if (sessionConfirmed.length === 0) return;
@@ -1574,24 +1573,27 @@ document.getElementById('csv-download-btn')?.addEventListener('click', async () 
     const rows = [['주문번호', '상품코드', '성함', '연락처', '우편번호', '주소', '판매금액', '상품명', '옵션', '메모']];
     let matched = 0;
 
+    let unmatched = 0;
     sessionConfirmed.forEach(({ customerPhone, customerName, items }) => {
       const phone = customerPhone.replace(/[^0-9]/g, '');
       const order = orderByPhone[phone];
       if (!order) {
         console.warn(`주문 미매칭: ${customerName} (${phone})`);
-        return; // 주문 없으면 제외 (카드 실패 등)
+        unmatched++;
+      } else {
+        matched++;
       }
-      matched++;
+      // 주문 없어도 포함 (빈칸으로)
+      const customerInfo = currentCustomers.find(c => c.phone === phone);
       items.forEach(({ name, option }) => {
-        // 옵션에서 색상:사이즈 형태 정리
         const cleanOption = (option || '').replace(/^[^:]+:/, '').trim();
         rows.push([
-          order.order_id,
+          order?.order_id || '',
           productCode,
-          order.receiver_name,
-          order.receiver_cellphone,
-          order.receiver_zipcode,
-          order.receiver_address,
+          order?.receiver_name || customerInfo?.name || customerName,
+          order?.receiver_cellphone || phone,
+          order?.receiver_zipcode || '',
+          order?.receiver_address || '',
           '50000',
           name,
           cleanOption,
@@ -1600,8 +1602,8 @@ document.getElementById('csv-download-btn')?.addEventListener('click', async () 
       });
     });
 
-    if (matched === 0) {
-      alert('매칭된 주문이 없습니다. 날짜 범위를 확인해주세요.');
+    if (rows.length <= 1) {
+      alert('확정된 코디가 없습니다. 먼저 코디를 확정해주세요.');
       return;
     }
 
@@ -1619,7 +1621,10 @@ document.getElementById('csv-download-btn')?.addEventListener('click', async () 
     a.click();
     URL.revokeObjectURL(url);
 
-    showToast(`✅ CSV 다운로드 완료 (${matched}명, ${rows.length - 1}개 상품)`);
+    const msg = unmatched > 0
+      ? `✅ CSV 완료 (${matched}명 매칭, ${unmatched}명 주문 미매칭 → 빈칸 포함)`
+      : `✅ CSV 다운로드 완료 (${matched}명, ${rows.length - 1}개 상품)`;
+    showToast(msg);
   } catch (e) {
     alert(`오류: ${e.message}`);
   } finally {
