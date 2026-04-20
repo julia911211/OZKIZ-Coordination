@@ -798,6 +798,38 @@ function field(label, id, placeholder) {
   return `<div><label style="${labelStyle}">${label}</label><input id="${id}" placeholder="${placeholder}" style="${inputStyle}" /></div>`;
 }
 
+// 토스트 알림
+function showToast(msg, type = 'success') {
+  const existing = document.getElementById('save-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.id = 'save-toast';
+  toast.style.cssText = `position:fixed;bottom:32px;left:50%;transform:translateX(-50%);background:${type === 'success' ? '#22c55e' : '#ef4444'};color:white;padding:12px 28px;border-radius:32px;font-size:15px;font-weight:700;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.2);transition:opacity 0.4s;`;
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
+}
+
+// Supabase 고객 저장 공통 함수 (insert 실패 시 콘솔 상세 로그)
+async function saveCustomerToSupabase(row) {
+  const toN = v => (v && v !== '-') ? v : null;
+  const toI = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
+  const payload = {
+    phone: row.phone,
+    name: row.name,
+    reg_id: toN(row.regId),
+    gender: toN(row.gender),
+    cloth_size: toN(row.clothSize),
+    shoe_size: toN(row.shoeSize),
+    pay_day: toI(row.payDay),
+    child_count: row.childCount || 1,
+    preference: row.preference || '없음',
+  };
+  const { error } = await supabase.from('customers').upsert(payload, { onConflict: 'phone' });
+  if (error) console.error('Supabase 저장 오류 상세:', JSON.stringify(error));
+  return error;
+}
+
 async function confirmAddCustomer() {
   const get = id => document.getElementById(id)?.value.trim() || '';
   const name = get('new-name');
@@ -805,7 +837,6 @@ async function confirmAddCustomer() {
   if (!name || !phone) { alert('이름과 연락처는 필수입니다.'); return; }
 
   const toNullable = v => (v && v !== '-') ? v : null;
-  const toIntOrNull = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
 
   const newCustomer = {
     regId: get('new-regId') || '-',
@@ -820,31 +851,20 @@ async function confirmAddCustomer() {
     preference: get('new-preference') || '없음',
   };
 
+  // 1. 즉시 로컬 저장
   currentCustomers.push(newCustomer);
   saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
-
-  // Supabase 저장
-  const { error } = await supabase.from('customers').insert({
-    phone: newCustomer.phone,
-    name: newCustomer.name,
-    reg_id: newCustomer.regId === '-' ? null : newCustomer.regId,
-    gender: toNullable(newCustomer.gender),
-    cloth_size: toNullable(newCustomer.clothSize),
-    shoe_size: toNullable(newCustomer.shoeSize),
-    pay_day: toIntOrNull(newCustomer.payDay),
-    child_count: newCustomer.childCount,
-    preference: newCustomer.preference,
-  });
-  if (error) {
-    console.warn('Supabase 저장 실패:', error.message);
-    alert(`저장 중 오류가 발생했습니다: ${error.message}`);
-    return;
-  }
-
   document.getElementById('add-customer-modal').remove();
   renderCustomerList(currentCustomers, lastCoordResults);
   document.getElementById('total-customers').textContent = currentCustomers.length;
-  alert(`${name} 고객이 추가되었습니다!`);
+
+  // 2. Supabase 저장
+  const error = await saveCustomerToSupabase(newCustomer);
+  if (error) {
+    showToast(`⚠️ 클라우드 저장 실패: ${error.message}`, 'error');
+  } else {
+    showToast(`✅ ${name} 고객 저장 완료`);
+  }
 }
 window.confirmAddCustomer = confirmAddCustomer;
 
@@ -920,28 +940,20 @@ async function confirmEditCustomer(originalPhone) {
   if (idx !== -1) currentCustomers[idx] = { ...currentCustomers[idx], ...updated };
   saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
 
-  const toNullableE = v => (v && v !== '-') ? v : null;
-  const toIntOrNullE = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
-
-  // Supabase 업데이트
-  const { error: updateError } = await supabase.from('customers').update({
-    phone: updated.phone,
-    name: updated.name,
-    reg_id: updated.regId === '-' ? null : updated.regId,
-    gender: toNullableE(updated.gender),
-    cloth_size: toNullableE(updated.clothSize),
-    shoe_size: toNullableE(updated.shoeSize),
-    pay_day: toIntOrNullE(updated.payDay),
-    child_count: updated.childCount,
-    preference: updated.preference,
-  }).eq('phone', originalPhone);
-  if (updateError) {
-    alert(`저장 중 오류: ${updateError.message}`);
-    return;
-  }
-
+  // 모달 닫고 즉시 렌더
   document.getElementById('edit-customer-modal').remove();
   renderCustomerList(currentCustomers, lastCoordResults);
+
+  // Supabase 저장 (phone이 바뀐 경우 기존 삭제 후 upsert)
+  if (newPhone !== originalPhone) {
+    await supabase.from('customers').delete().eq('phone', originalPhone);
+  }
+  const error = await saveCustomerToSupabase(updated);
+  if (error) {
+    showToast(`⚠️ 클라우드 저장 실패: ${error.message}`, 'error');
+  } else {
+    showToast(`✅ ${name} 수정 저장 완료`);
+  }
 }
 window.openEditCustomerModal = openEditCustomerModal;
 window.confirmEditCustomer = confirmEditCustomer;
