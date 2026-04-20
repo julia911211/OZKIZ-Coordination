@@ -224,11 +224,31 @@ async function initApp() {
 
   if (currentCustomers.length > 0) {
     paydayFilter.value = 'today';
+    // 데이터 로드 완료 후 오늘 결제 대상자 코디 자동 생성
+    if (currentInventory.length > 0) {
+      autoGenerateCoordinations();
+    }
     renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
   } else {
     updateStats();
     renderCustomerList(currentCustomers);
   }
+}
+
+function autoGenerateCoordinations() {
+  const season = seasonSelect?.value || '봄/가을';
+  lastCoordResults = [];
+  sessionRejectedMap = {};
+  const globalUsed = new Set();
+  currentCustomers.forEach(c => {
+    const count = c.childCount || 1;
+    const sets = [];
+    for (let i = 0; i < count; i++) {
+      sets.push(coordinate(c, currentInventory, currentHistoryMap, season, globalUsed));
+    }
+    lastCoordResults.push({ customerPhone: c.phone, sets });
+  });
+  console.log(`코디 자동 생성 완료: ${lastCoordResults.length}명`);
 }
 
 initApp();
@@ -1418,9 +1438,7 @@ runBtn.addEventListener('click', () => {
   renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
 });
 
-if (currentCustomers.length > 0 && currentInventory.length > 0) {
-  setTimeout(() => runBtn.click(), 100);
-}
+// 코디 자동 생성은 initApp() 내 데이터 로드 완료 후 실행됨
 
 customerSearch.addEventListener('input', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
 paydayFilter.addEventListener('change', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
