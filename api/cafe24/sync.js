@@ -1,19 +1,47 @@
 // 카페24 정기구독 고객 동기화
 // - subscription/shipments API 사용 (정기배송 신청 내역)
-// - Vercel 크론이 매일 오전 10시(KST) 자동 실행
+// - Vercel 크론이 매일 오전 8시(KST) 자동 실행
 // - 수동 실행: https://v0-static-html-upload.vercel.app/api/cafe24/sync
+//
+// 동작 방식:
+//   1. 기존 고객(DB에 있는) → 이용중/해지 여부만 체크. 해지면 DB에서 삭제.
+//   2. 신규 고객(SYNC_CUTOFF_DATE 이후 신청) → 전체 데이터 가져와서 신규 등록.
 
 import { createClient } from '@supabase/supabase-js';
 
 const MALL_ID = process.env.CAFE24_MALL_ID;
 const API_VERSION = '2026-03-01';
 
-// 전화번호 정규화 (010-1234-5678 → 01012345678)
+// 이 날짜 이후 신청한 고객만 신규 등록 (기존 DB 구축 완료일)
+const SYNC_CUTOFF_DATE = '2026-04-20';
+
+// 전화번호 정규화
 function normalizePhone(phone) {
   return (phone || '').replace(/[^0-9]/g, '');
 }
 
-// Supabase에서 저장된 토큰 가져오기 + 만료 시 갱신
+// option_value_default 파싱: "성별=여아, 의류사이즈=110, 신발사이즈=160"
+function parseOptionValue(optionStr) {
+  const result = { gender: null, clothSize: null, shoeSize: null };
+  if (!optionStr) return result;
+  optionStr.split(',').forEach(part => {
+    const [k, v] = part.split('=').map(s => s.trim());
+    if (!k || !v) return;
+    if (k.includes('성별')) result.gender = v;
+    else if (k.includes('의류')) result.clothSize = v;
+    else if (k.includes('신발')) result.shoeSize = v;
+  });
+  return result;
+}
+
+// 정기결제일: created_date의 일(day) 추출
+function extractPayDay(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d.getDate();
+}
+
+// Supabase 토큰 조회 + 만료 시 갱신
 async function getAccessToken(supabase) {
   const { data, error } = await supabase
     .from('cafe24_tokens')
@@ -24,14 +52,11 @@ async function getAccessToken(supabase) {
   if (error || !data) throw new Error('저장된 카페24 토큰이 없습니다. /api/cafe24/auth 에서 먼저 인증해주세요.');
 
   const now = new Date();
-  const expiresAt = new Date(data.expires_at);
   const bufferMs = 5 * 60 * 1000;
-
-  if (now < new Date(expiresAt.getTime() - bufferMs)) {
+  if (now < new Date(new Date(data.expires_at).getTime() - bufferMs)) {
     return data.access_token;
   }
 
-  // 리프레시 토큰으로 갱신
   const credentials = Buffer.from(
     `${process.env.CAFE24_CLIENT_ID}:${process.env.CAFE24_CLIENT_SECRET}`
   ).toString('base64');
@@ -87,8 +112,11 @@ async function cafe24Get(accessToken, path) {
   return { status: res.status, ok: res.ok, data: json };
 }
 
-// 특정 기간의 정기배송 신청 내역 수집 (페이지네이션)
-async function fetchShipmentsForRange(accessToken, startDate, endDate) {
+// 최근 60일 정기배송 신청 내역 수집 (페이지네이션)
+async function fetchRecentShipments(accessToken) {
+  const endDate = new Date().toISOString().slice(0, 10);
+  const startDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   const results = [];
   let offset = 0;
   const limit = 100;
@@ -102,36 +130,11 @@ async function fetchShipmentsForRange(accessToken, startDate, endDate) {
 
     const shipments = data.shipments || [];
     results.push(...shipments);
-
     if (shipments.length < limit) break;
     offset += limit;
   }
 
   return results;
-}
-
-// 서비스 시작(2020-01-01)부터 오늘까지 연도별로 나눠 전체 수집
-async function fetchAllSubscriptionShipments(accessToken) {
-  const allShipments = [];
-  const today = new Date();
-  const serviceStartYear = 2020;
-
-  // 연도별로 최대 1년 단위로 쪼개서 요청
-  for (let year = serviceStartYear; year <= today.getFullYear(); year++) {
-    const startDate = `${year}-01-01`;
-    const rawEnd = new Date(year + 1, 0, 0); // 해당 연도 마지막 날
-    const endDate = rawEnd > today
-      ? today.toISOString().slice(0, 10)
-      : rawEnd.toISOString().slice(0, 10);
-
-    const shipments = await fetchShipmentsForRange(accessToken, startDate, endDate);
-    allShipments.push(...shipments);
-
-    // 올해면 더 이상 루프 불필요
-    if (year === today.getFullYear()) break;
-  }
-
-  return allShipments;
 }
 
 export default async function handler(req, res) {
@@ -144,80 +147,109 @@ export default async function handler(req, res) {
     // 1. 토큰 준비
     const accessToken = await getAccessToken(supabase);
 
-    // 2. 전체 기간 정기배송 신청 내역 수집
-    const allShipments = await fetchAllSubscriptionShipments(accessToken);
+    // 2. 최근 60일 신청 내역 수집
+    const shipments = await fetchRecentShipments(accessToken);
 
-    // 3. subscription_id 기준 중복 제거 후 전화번호 맵 구성
-    //    (한 고객이 여러 회차 배송 내역 가질 수 있음)
-    const phoneMap = {};
-    const cancelledPhones = new Set();
+    // 3. phone 기준으로 구독 상태 집계
+    //    한 phone에 여러 subscription이 있을 수 있음
+    //    → 하나라도 활성(terminated_date 없음)이면 활성으로 판단
+    const phoneStatusMap = {}; // phone → { isActive, subscriptionId, createdDate, shipment }
 
-    for (const s of allShipments) {
+    for (const s of shipments) {
       const phone = normalizePhone(s.buyer_cellphone || s.receiver_cellphone || '');
       if (!phone) continue;
 
       const isTerminated = !!s.terminated_date;
-      const state = s.subscription_state || '';
+      const createdDate = s.created_date || '';
 
-      if (isTerminated) {
-        cancelledPhones.add(phone);
-      }
-
-      if (!phoneMap[phone]) {
-        phoneMap[phone] = {
-          phone,
-          name: s.buyer_name || s.receiver_name || '',
-          member_id: s.member_id || '',
-          subscription_id: s.subscription_id || '',
-          terminated: isTerminated,
-          state,
+      if (!phoneStatusMap[phone]) {
+        phoneStatusMap[phone] = {
+          isActive: !isTerminated,
+          subscriptionId: s.subscription_id || '',
+          createdDate,
+          shipment: s,
         };
       } else {
-        // 해지 안 된 배송 내역이 있으면 활성으로 업데이트
+        // 하나라도 활성이면 활성
         if (!isTerminated) {
-          phoneMap[phone].terminated = false;
+          phoneStatusMap[phone].isActive = true;
+          phoneStatusMap[phone].shipment = s;
         }
       }
     }
 
-    // 해지 여부 최종 정리 (어느 시점에든 활성 내역 있으면 활성)
-    for (const phone of Object.keys(phoneMap)) {
-      phoneMap[phone].isActive = !cancelledPhones.has(phone) ||
-        allShipments.some(s =>
-          normalizePhone(s.buyer_cellphone || s.receiver_cellphone || '') === phone &&
-          !s.terminated_date
-        );
-    }
-
-    const allSubscribers = Object.values(phoneMap);
-    const activeSubscribers = allSubscribers.filter(s => s.isActive);
-
-    // 4. Supabase 기존 고객 phone 목록
+    // 4. 기존 DB 고객 조회
     const { data: existingCustomers, error: custError } = await supabase
       .from('customers')
-      .select('phone');
+      .select('id, phone, name');
     if (custError) throw new Error(`고객 목록 조회 실패: ${custError.message}`);
 
-    const existingPhones = new Set(
+    const existingPhoneSet = new Set(
       (existingCustomers || []).map(c => normalizePhone(c.phone))
     );
 
-    // 5. 신규 활성 구독자만 추가
+    // 5. 기존 고객 중 해지된 고객 삭제
+    const cancelledPhones = [];
+    for (const c of (existingCustomers || [])) {
+      const phone = normalizePhone(c.phone);
+      const status = phoneStatusMap[phone];
+      // 카페24에 데이터가 있고, 해지된 경우에만 삭제
+      if (status && !status.isActive) {
+        cancelledPhones.push(phone);
+      }
+    }
+
+    let deletedCount = 0;
+    if (cancelledPhones.length > 0) {
+      const { error: delError } = await supabase
+        .from('customers')
+        .delete()
+        .in('phone', cancelledPhones);
+      if (delError) throw new Error(`해지 고객 삭제 실패: ${delError.message}`);
+      deletedCount = cancelledPhones.length;
+      // existingPhoneSet에서도 제거
+      cancelledPhones.forEach(p => existingPhoneSet.delete(p));
+    }
+
+    // 6. 신규 고객 등록 (SYNC_CUTOFF_DATE 이후 신청 + DB에 없는 phone)
     const newCustomers = [];
-    for (const sub of activeSubscribers) {
-      if (!sub.phone || existingPhones.has(sub.phone)) continue;
+
+    for (const [phone, status] of Object.entries(phoneStatusMap)) {
+      // DB에 이미 있거나, 해지된 신규는 스킵
+      if (existingPhoneSet.has(phone)) continue;
+      if (!status.isActive) continue;
+      // 컷오프 날짜 이후 신청한 고객만
+      if (!status.createdDate || status.createdDate < SYNC_CUTOFF_DATE) continue;
+
+      const s = status.shipment;
+      const name = s.buyer_name || s.receiver_name || '';
+
+      // 옵션에서 성별/사이즈 추출
+      const items = s.items || [];
+      let gender = null, clothSize = null, shoeSize = null, totalQty = 0;
+
+      for (const item of items) {
+        const opts = parseOptionValue(item.option_value_default || item.option_value || '');
+        if (opts.gender && !gender) gender = opts.gender;
+        if (opts.clothSize && !clothSize) clothSize = opts.clothSize;
+        if (opts.shoeSize && !shoeSize) shoeSize = opts.shoeSize;
+        totalQty += parseInt(item.quantity || 1);
+      }
+
+      const payDay = extractPayDay(status.createdDate);
 
       newCustomers.push({
-        name: sub.name,
-        phone: sub.phone,
-        gender: null,
-        cloth_size: null,
-        shoe_size: null,
-        pay_day: null,
-        child_count: 1,
+        reg_id: status.subscriptionId,
+        name,
+        phone,
+        gender,
+        cloth_size: clothSize,
+        shoe_size: shoeSize,
+        pay_day: payDay,
+        child_count: totalQty || 1,
         preference: '없음',
       });
-      existingPhones.add(sub.phone);
+      existingPhoneSet.add(phone);
     }
 
     let addedCount = 0;
@@ -229,20 +261,20 @@ export default async function handler(req, res) {
       addedCount = newCustomers.length;
     }
 
-    // 6. 해지자 목록 (DB에 있는데 해지된 경우)
-    const cancelledInDb = allSubscribers
-      .filter(s => !s.isActive && existingPhones.has(s.phone))
-      .map(s => ({ name: s.name, phone: s.phone }));
-
     const result = {
       success: true,
-      total_shipment_records: allShipments.length,
-      unique_subscribers: allSubscribers.length,
-      active_subscribers: activeSubscribers.length,
-      cancelled_subscribers: allSubscribers.length - activeSubscribers.length,
+      shipments_fetched: shipments.length,
+      deleted_cancelled: deletedCount,
+      cancelled_customers: cancelledPhones.map(p => {
+        const c = (existingCustomers || []).find(x => normalizePhone(x.phone) === p);
+        return { name: c?.name || '', phone: p };
+      }),
       new_added: addedCount,
-      new_customers: newCustomers.map(c => ({ name: c.name, phone: c.phone })),
-      cancelled_in_db: cancelledInDb,
+      new_customers: newCustomers.map(c => ({
+        name: c.name, phone: c.phone, gender: c.gender,
+        cloth_size: c.cloth_size, shoe_size: c.shoe_size,
+        pay_day: c.pay_day, child_count: c.child_count,
+      })),
       synced_at: new Date().toISOString(),
     };
 
