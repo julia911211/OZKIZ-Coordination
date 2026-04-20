@@ -98,8 +98,8 @@ const selectedDayLabel = document.querySelector('#selected-day-label');
 const filteredCountEl = document.querySelector('#filtered-count');
 const seasonSelect = document.querySelector('#season-select');
 const customerSearch = document.querySelector('#customer-search');
-const paydayFilter = document.querySelector('#payday-filter');
-const calendarBtn = document.querySelector('#calendar-btn');
+const dateFrom = document.querySelector('#date-from');
+const dateTo = document.querySelector('#date-to');
 
 async function fetchAllData() {
   console.log('Supabase에서 데이터를 불러오는 중...');
@@ -219,11 +219,12 @@ async function initApp() {
   currentCustomers = applyOverrides(currentCustomers);
   updateStats();
 
-  const daysHtml = Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}일</option>`).join('');
-  paydayFilter.insertAdjacentHTML('beforeend', daysHtml);
+  // 날짜 범위 기본값: 오늘 ~ 오늘
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (dateFrom) dateFrom.value = todayStr;
+  if (dateTo) dateTo.value = todayStr;
 
   if (currentCustomers.length > 0) {
-    paydayFilter.value = 'today';
     // 데이터 로드 완료 후 오늘 결제 대상자 코디 자동 생성
     if (currentInventory.length > 0) {
       autoGenerateCoordinations();
@@ -260,13 +261,16 @@ function updateStats() {
   const filteredCount = applyMainFilters(currentCustomers).length;
   if (filteredCountEl) filteredCountEl.textContent = filteredCount;
 
-  if (paydayFilter) {
-    const val = paydayFilter.value;
-    if (val === 'all') {
-      selectedDayStat.style.display = 'none';
-    } else {
+  if (selectedDayStat && selectedDayLabel) {
+    const from = dateFrom?.value;
+    const to = dateTo?.value;
+    if (from && to) {
       selectedDayStat.style.display = 'flex';
-      selectedDayLabel.textContent = val === 'today' ? '오늘 결제 고객' : `${val}일 결제 고객`;
+      const fromLabel = from.slice(5).replace('-', '/');
+      const toLabel = to.slice(5).replace('-', '/');
+      selectedDayLabel.textContent = from === to ? `${fromLabel} 결제 고객` : `${fromLabel} ~ ${toLabel} 결제 고객`;
+    } else {
+      selectedDayStat.style.display = 'none';
     }
   }
 }
@@ -424,7 +428,6 @@ historyUpload.addEventListener('change', (e) => {
 
       saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
       updateStats();
-      paydayFilter.value = 'all';
       renderCustomerList(currentCustomers);
     }
   });
@@ -1402,23 +1405,36 @@ function renderCustomerList(customers, resultsMap = null) {
   });
 }
 
+// 날짜 범위에 해당하는 결제일(day) Set 생성
+// 예: 2026-04-19 ~ 2026-04-21 → {19, 20, 21}
+// 예: 2026-04-28 ~ 2026-05-03 → {28, 29, 30, 1, 2, 3}
+function getPayDaySet(fromStr, toStr) {
+  const days = new Set();
+  if (!fromStr || !toStr) return days;
+  const start = new Date(fromStr);
+  const end = new Date(toStr);
+  if (isNaN(start) || isNaN(end)) return days;
+  const cur = new Date(start);
+  while (cur <= end) {
+    days.add(cur.getDate());
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+}
+
 function applyMainFilters(customers) {
   const query = customerSearch?.value.toLowerCase().trim() || '';
-  const payDay = paydayFilter.value;
-  const today = new Date().getDate().toString();
+  const payDays = getPayDaySet(dateFrom?.value, dateTo?.value);
 
   return customers.filter(c => {
     const nameMatch = c.name.toLowerCase().includes(query);
     const phoneMatch = c.phone.includes(query) || (c.displayPhone && c.displayPhone.includes(query));
     if (!nameMatch && !phoneMatch) return false;
 
-    if (payDay === 'all') return true;
+    if (payDays.size === 0) return true; // 날짜 미설정 시 전체
 
-    let targetDay = payDay;
-    if (payDay === 'today') targetDay = today;
-
-    const normalize = (d) => d.toString().padStart(2, '0');
-    return normalize(c.payDay) === normalize(targetDay);
+    const day = parseInt(c.payDay);
+    return !isNaN(day) && payDays.has(day);
   });
 }
 
@@ -1441,8 +1457,14 @@ runBtn.addEventListener('click', () => {
 // 코디 자동 생성은 initApp() 내 데이터 로드 완료 후 실행됨
 
 customerSearch.addEventListener('input', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
-paydayFilter.addEventListener('change', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
-calendarBtn.addEventListener('click', () => paydayFilter.focus());
+
+const onDateChange = () => {
+  autoGenerateCoordinations();
+  renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
+  updateStats();
+};
+dateFrom?.addEventListener('change', onDateChange);
+dateTo?.addEventListener('change', onDateChange);
 
 // 고객 추가 버튼
 document.getElementById('add-customer-btn')?.addEventListener('click', openAddCustomerModal);

@@ -74,12 +74,11 @@
                 <option value="겨울">겨울</option>
                 <option value="사계절">사계절</option>
               </select>
-              <div class="date-filter-box">
-                <button id="calendar-btn" class="icon-btn" title="결제일별 보기">📅</button>
-                <select id="payday-filter" class="payday-dropdown">
-                  <option value="all">전체 결제일</option>
-                  <option value="today" selected>오늘 결제일</option>
-                </select>
+              <div class="date-filter-box" style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:13px;color:#64748b;font-weight:600;">📅</span>
+                <input type="date" id="date-from" style="border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:13px;color:#1e293b;outline:none;cursor:pointer;" />
+                <span style="color:#64748b;font-weight:700;">~</span>
+                <input type="date" id="date-to" style="border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:13px;color:#1e293b;outline:none;cursor:pointer;" />
               </div>
               <button id="run-btn" class="primary-btn">자동 코디 생성하기</button>
             </div>
