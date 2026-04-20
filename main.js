@@ -661,12 +661,22 @@ function renderCustomerTable(customers) {
 
   tableBody.innerHTML = '';
 
-  if (customers.length === 0) {
+  // 신청번호(regId) 기준 내림차순 정렬 (최신순)
+  // S-20240823-0000918 형태: 날짜 부분 기준으로 정렬
+  const sorted = [...customers].sort((a, b) => {
+    const ra = (a.regId || '').replace(/^S-/, '');
+    const rb = (b.regId || '').replace(/^S-/, '');
+    if (!ra || ra === '-') return 1;
+    if (!rb || rb === '-') return -1;
+    return rb.localeCompare(ra);
+  });
+
+  if (sorted.length === 0) {
     tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-dim);">검색 결과가 없습니다.</td></tr>';
     return;
   }
 
-  customers.forEach(c => {
+  sorted.forEach(c => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="color:var(--primary); font-weight:600;">${c.regId || '-'}</td>
