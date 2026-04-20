@@ -5,6 +5,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 const MALL_ID = process.env.CAFE24_MALL_ID;
+const API_VERSION = '2026-03-01';
 
 // 전화번호 정규화 (010-1234-5678 → 01012345678)
 function normalizePhone(phone) {
@@ -23,13 +24,13 @@ async function getAccessToken(supabase) {
 
   const now = new Date();
   const expiresAt = new Date(data.expires_at);
-  const bufferMs = 5 * 60 * 1000; // 만료 5분 전에 갱신
+  const bufferMs = 5 * 60 * 1000;
 
   if (now < new Date(expiresAt.getTime() - bufferMs)) {
-    return data.access_token; // 아직 유효
+    return data.access_token;
   }
 
-  // 액세스 토큰 만료 → 리프레시 토큰으로 갱신
+  // 리프레시 토큰으로 갱신
   const credentials = Buffer.from(
     `${process.env.CAFE24_CLIENT_ID}:${process.env.CAFE24_CLIENT_SECRET}`
   ).toString('base64');
@@ -68,14 +69,14 @@ async function getAccessToken(supabase) {
   return newTokens.access_token;
 }
 
-// 카페24 API 호출 헬퍼
+// 카페24 API GET 헬퍼
 async function cafe24Get(accessToken, path) {
   const res = await fetch(
     `https://${MALL_ID}.cafe24api.com/api/v2/admin/${path}`,
     {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'X-Cafe24-Api-Version': '2026-03-01',
+        'X-Cafe24-Api-Version': API_VERSION,
       },
     }
   );
@@ -85,41 +86,43 @@ async function cafe24Get(accessToken, path) {
   return { status: res.status, ok: res.ok, data: json };
 }
 
-// 카페24에서 활성 구독 목록 전체 가져오기
-async function fetchAllSubscriptions(accessToken) {
-  // 후보 엔드포인트 순서대로 시도
-  const candidates = [
-    'subscriptions',
-    'recurringorders',
-    'billingkeys',
-  ];
+// 최근 35일 주문 중 subscription:"T" 인 것만 수집 (페이지네이션)
+async function fetchSubscriptionOrders(accessToken) {
+  const endDate = new Date().toISOString().slice(0, 10);
+  const startDate = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  for (const endpoint of candidates) {
-    const { status, ok, data } = await cafe24Get(accessToken, `${endpoint}?limit=10`);
-    console.log(`[탐색] ${endpoint} → ${status}`, JSON.stringify(data).slice(0, 200));
-    if (ok) {
-      // 성공한 엔드포인트로 전체 페이지 수집
-      const results = [];
-      let offset = 0;
-      const limit = 100;
-      const rootKey = Object.keys(data).find(k => Array.isArray(data[k]));
-      if (!rootKey) return [];
+  const results = [];
+  let offset = 0;
+  const limit = 100;
 
-      results.push(...data[rootKey]);
-      while (data[rootKey].length === 10) {
-        offset += 10;
-        const next = await cafe24Get(accessToken, `${endpoint}?limit=${limit}&offset=${offset}`);
-        if (!next.ok) break;
-        const items = next.data[rootKey] || [];
-        results.push(...items);
-        if (items.length < limit) break;
-      }
-      console.log(`[사용] ${endpoint}, 총 ${results.length}건`);
-      return results;
-    }
+  while (true) {
+    const { ok, data } = await cafe24Get(
+      accessToken,
+      `orders?limit=${limit}&offset=${offset}&start_date=${startDate}&end_date=${endDate}&paid=T&canceled=F`
+    );
+    if (!ok) break;
+
+    const orders = data.orders || [];
+    // subscription: "T" 인 주문만 필터
+    const subOrders = orders.filter(o => o.subscription === 'T');
+    results.push(...subOrders);
+
+    if (orders.length < limit) break;
+    offset += limit;
   }
 
-  throw new Error('구독 관련 API를 찾을 수 없습니다. Vercel 함수 로그를 확인해주세요.');
+  return results;
+}
+
+// member_id로 카페24 회원 전화번호 조회
+async function fetchMemberPhone(accessToken, memberId) {
+  const { ok, data } = await cafe24Get(accessToken, `customers?member_id=${encodeURIComponent(memberId)}`);
+  if (!ok || !data.customers || data.customers.length === 0) return null;
+  const c = data.customers[0];
+  return {
+    phone: normalizePhone(c.cellphone || c.phone || ''),
+    name: c.name || c.billing_name || '',
+  };
 }
 
 export default async function handler(req, res) {
@@ -132,18 +135,26 @@ export default async function handler(req, res) {
     // 1. 토큰 준비
     const accessToken = await getAccessToken(supabase);
 
-    // 2. 카페24 구독 목록 가져오기
-    const subscriptions = await fetchAllSubscriptions(accessToken);
+    // 2. 최근 35일 정기결제 주문 수집
+    const subOrders = await fetchSubscriptionOrders(accessToken);
 
-    // 활성 구독만 필터 (status: A=Active, I=Inactive, C=Cancel)
-    const active = subscriptions.filter(s => s.status === 'A' || s.status === 'active');
-    const cancelled = subscriptions.filter(s => s.status === 'C' || s.status === 'cancel');
+    // member_id 기준 중복 제거 (한 명이 여러 주문 있을 수 있음)
+    const memberMap = {};
+    for (const o of subOrders) {
+      if (o.member_id && !memberMap[o.member_id]) {
+        memberMap[o.member_id] = {
+          member_id: o.member_id,
+          name: o.billing_name || '',
+          email: o.member_email || '',
+        };
+      }
+    }
+    const uniqueMembers = Object.values(memberMap);
 
-    // 3. Supabase 기존 고객 목록 가져오기
+    // 3. Supabase 기존 고객 phone 목록
     const { data: existingCustomers, error: custError } = await supabase
       .from('customers')
       .select('phone');
-
     if (custError) throw new Error(`고객 목록 조회 실패: ${custError.message}`);
 
     const existingPhones = new Set(
@@ -152,12 +163,16 @@ export default async function handler(req, res) {
 
     // 4. 신규 구독자 추가
     const newCustomers = [];
-    for (const sub of active) {
-      const phone = normalizePhone(sub.buyer_phone1 || sub.buyer_phone || '');
+    for (const member of uniqueMembers) {
+      // 전화번호 조회
+      const info = await fetchMemberPhone(accessToken, member.member_id);
+      const phone = info?.phone || '';
+      const name = info?.name || member.name;
+
       if (!phone || existingPhones.has(phone)) continue;
 
       newCustomers.push({
-        name: sub.buyer_name || '',
+        name,
         phone,
         gender: null,
         cloth_size: null,
@@ -166,7 +181,7 @@ export default async function handler(req, res) {
         child_count: 1,
         preference: '없음',
       });
-      existingPhones.add(phone); // 중복 방지
+      existingPhones.add(phone);
     }
 
     let addedCount = 0;
@@ -178,21 +193,15 @@ export default async function handler(req, res) {
       addedCount = newCustomers.length;
     }
 
-    // 5. 해지자 목록 정리 (삭제는 안 하고 로그만 — 직접 확인 후 처리)
-    const cancelledPhones = cancelled
-      .map(s => normalizePhone(s.buyer_phone1 || s.buyer_phone || ''))
-      .filter(p => p && existingPhones.has(p));
-
     const result = {
       success: true,
-      total_active: active.length,
+      subscription_orders_found: subOrders.length,
+      unique_subscribers: uniqueMembers.length,
       new_added: addedCount,
-      cancelled_in_db: cancelledPhones.length,
-      cancelled_phones: cancelledPhones, // 앱에서 확인 후 직접 삭제
+      new_customers: newCustomers.map(c => ({ name: c.name, phone: c.phone })),
       synced_at: new Date().toISOString(),
     };
 
-    console.log('동기화 완료:', result);
     res.status(200).json(result);
 
   } catch (e) {
