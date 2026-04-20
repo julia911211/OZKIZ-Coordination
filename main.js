@@ -1500,6 +1500,16 @@ const onDateChange = () => {
 dateFrom?.addEventListener('change', onDateChange);
 dateTo?.addEventListener('change', onDateChange);
 
+document.getElementById('show-all-btn')?.addEventListener('click', () => {
+  if (dateFrom) dateFrom.value = '';
+  if (dateTo) dateTo.value = '';
+  lastCoordResults = [];
+  sessionRejectedMap = {};
+  autoGenerateCoordinations();
+  renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
+  updateStats();
+});
+
 // 고객 추가 버튼
 document.getElementById('add-customer-btn')?.addEventListener('click', openAddCustomerModal);
 
