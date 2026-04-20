@@ -39,32 +39,21 @@ export default async function handler(req, res) {
     const dateRange = `start_date=${startDate}&end_date=${endDate}`;
 
     const endpoints = [
-      // 정기배송 관련 후보
-      `regularshipments?limit=2`,
-      `regulardeliveries?limit=2`,
-      `regularissues?limit=2`,
-      `regularorders?limit=2`,
-      `regularproducts?limit=2`,
-      `regularsubscriptions?limit=2`,
-      `regularproductsubscriptions?limit=2`,
-      // 구독/빌링 관련 후보
-      `subscriptions?limit=2`,
-      `subscriptionorders?limit=2`,
-      `subscriptionshipments?limit=2`,
-      `subscriptionproducts?limit=2`,
-      `billingorders?limit=2`,
-      `billingshipments?limit=2`,
-      `recurringorders?limit=2`,
-      `recurringshipments?limit=2`,
-      // 날짜 범위 포함
-      `regularshipments?limit=2&${dateRange}`,
-      `regulardeliveries?limit=2&${dateRange}`,
-      `regularorders?limit=2&${dateRange}`,
-      `subscriptions?limit=2&${dateRange}`,
-      // 중첩 경로 후보
-      `subscription/recurringorders?limit=2`,
+      // ✅ subscription/shipments 존재 확인됨 — 날짜 파라미터 추가
+      `subscription/shipments?limit=2&${dateRange}`,
+      // subscription/ 네임스페이스 탐색
+      `subscription/orders?limit=2&${dateRange}`,
+      `subscription/products?limit=2`,
+      `subscription/customers?limit=2`,
+      `subscription/issues?limit=2&${dateRange}`,
+      `subscription/recurringorders?limit=2&${dateRange}`,
+      `subscription/regularshipments?limit=2&${dateRange}`,
+      `subscription/applications?limit=2`,
+      `subscription/requests?limit=2`,
+      `subscription/members?limit=2`,
+      // 날짜 없이도 되는지 확인
       `subscription/shipments?limit=2`,
-      `products/regularshipments?limit=2`,
+      `subscription/orders?limit=2`,
     ];
 
     const results = {};
