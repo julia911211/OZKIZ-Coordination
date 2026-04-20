@@ -679,7 +679,7 @@ function renderCustomerTable(customers) {
   sorted.forEach(c => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="color:var(--primary); font-weight:600;">${c.regId || '-'}</td>
+      <td style="color:var(--primary); font-weight:600; cursor:pointer; text-decoration:underline;" onclick="openEditCustomerModal('${c.phone}')" title="클릭하여 수정">${c.regId || '-'}</td>
       <td style="font-weight:700;">${c.name}</td>
       <td>${formatPhone(c.displayPhone || c.phone)}</td>
       <td><span class="badge ${c.gender === '여아' ? 'pink' : (c.gender === '남아' ? 'blue' : '')}">${c.gender}</span></td>
@@ -796,6 +796,99 @@ function confirmAddCustomer() {
   alert(`${name} 고객이 추가되었습니다!`);
 }
 window.confirmAddCustomer = confirmAddCustomer;
+
+// ─── 고객 수정 모달 ───────────────────────────────────────────────────────────
+function openEditCustomerModal(phone) {
+  const c = currentCustomers.find(x => x.phone === phone);
+  if (!c) return;
+
+  const existing = document.getElementById('edit-customer-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'edit-customer-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  const eField = (label, id, val, placeholder = '') =>
+    `<div><label style="${labelStyle}">${label}</label><input id="edit-${id}" value="${val || ''}" placeholder="${placeholder}" style="${inputStyle}" /></div>`;
+
+  modal.innerHTML = `
+    <div style="background:white;border-radius:1.5rem;padding:2rem;width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.3);">
+      <h2 style="font-size:1.3rem;font-weight:800;margin-bottom:1.5rem;color:#1e293b;">고객 수정 — ${c.name}</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        ${eField('신청번호', 'regId', c.regId === '-' ? '' : c.regId, 'S-20260401-0000001')}
+        ${eField('이름', 'name', c.name, '홍길동')}
+        ${eField('연락처', 'phone', c.displayPhone || c.phone, '010-1234-5678')}
+        <div>
+          <label style="${labelStyle}">성별</label>
+          <select id="edit-gender" style="${inputStyle}">
+            <option value="여아" ${c.gender === '여아' ? 'selected' : ''}>여아</option>
+            <option value="남아" ${c.gender === '남아' ? 'selected' : ''}>남아</option>
+            <option value="-" ${!c.gender || c.gender === '-' ? 'selected' : ''}>-</option>
+          </select>
+        </div>
+        ${eField('의류 사이즈', 'clothSize', c.clothSize === '-' ? '' : c.clothSize, '120')}
+        ${eField('슈즈 사이즈', 'shoeSize', c.shoeSize === '-' ? '' : c.shoeSize, '180')}
+        ${eField('정기결제일 (일)', 'payDay', c.payDay === '-' ? '' : c.payDay, '15')}
+        ${eField('아이 수', 'childCount', c.childCount, '1')}
+      </div>
+      <div style="margin-top:1rem;">
+        <label style="${labelStyle}">취향/메모</label>
+        <textarea id="edit-preference" style="${inputStyle}height:80px;resize:vertical;">${c.preference && c.preference !== '없음' ? c.preference : ''}</textarea>
+      </div>
+      <div style="display:flex;gap:0.75rem;margin-top:1.5rem;">
+        <button onclick="confirmEditCustomer('${phone}')" style="flex:1;background:var(--primary);color:white;border:none;border-radius:0.75rem;padding:0.85rem;font-size:1rem;font-weight:700;cursor:pointer;">저장하기</button>
+        <button onclick="document.getElementById('edit-customer-modal').remove()" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:0.75rem;padding:0.85rem;font-size:1rem;font-weight:700;cursor:pointer;">취소</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function confirmEditCustomer(originalPhone) {
+  const get = id => document.getElementById(id)?.value.trim() || '';
+  const name = get('edit-name');
+  const newPhone = normalizePhone(get('edit-phone'));
+  if (!name || !newPhone) { alert('이름과 연락처는 필수입니다.'); return; }
+
+  const updated = {
+    regId: get('edit-regId') || '-',
+    name,
+    phone: newPhone,
+    displayPhone: get('edit-phone'),
+    gender: get('edit-gender') || '-',
+    clothSize: get('edit-clothSize') || '-',
+    shoeSize: get('edit-shoeSize') || '-',
+    payDay: get('edit-payDay') || '-',
+    childCount: parseInt(get('edit-childCount')) || 1,
+    preference: get('edit-preference') || '없음',
+  };
+
+  const idx = currentCustomers.findIndex(c => c.phone === originalPhone);
+  if (idx !== -1) currentCustomers[idx] = { ...currentCustomers[idx], ...updated };
+  saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
+
+  // Supabase 업데이트
+  supabase.from('customers').update({
+    phone: updated.phone,
+    name: updated.name,
+    reg_id: updated.regId,
+    gender: updated.gender,
+    cloth_size: updated.clothSize,
+    shoe_size: updated.shoeSize,
+    pay_day: updated.payDay,
+    child_count: updated.childCount,
+    preference: updated.preference,
+  }).eq('phone', originalPhone).then(({ error }) => {
+    if (error) console.warn('Supabase 수정 실패:', error.message);
+  });
+
+  document.getElementById('edit-customer-modal').remove();
+  renderCustomerList(currentCustomers, lastCoordResults);
+}
+window.openEditCustomerModal = openEditCustomerModal;
+window.confirmEditCustomer = confirmEditCustomer;
 
 function renderCustomerList(customers, resultsMap = null) {
   // Always show the FULL database in the table view, ignoring coord filters
