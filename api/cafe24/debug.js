@@ -39,10 +39,13 @@ export default async function handler(req, res) {
     const dateRange = `start_date=${startDate}&end_date=${endDate}`;
 
     const endpoints = [
-      `orders?limit=2&${dateRange}`,
-      `orders?limit=2&order_type=subscription&${dateRange}`,
-      `orders?limit=2&order_type=recurring&${dateRange}`,
-      `orders?limit=2&order_type=norder&${dateRange}`,
+      `regularshipments?limit=2`,
+      `regulardeliveries?limit=2`,
+      `regularissues?limit=2`,
+      `periodicshipments?limit=2`,
+      `subscriptionshipments?limit=2`,
+      `regularshipments?limit=2&${dateRange}`,
+      `regulardeliveries?limit=2&${dateRange}`,
     ];
 
     const results = {};
