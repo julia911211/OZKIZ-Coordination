@@ -785,6 +785,7 @@ function confirmAddCustomer() {
   document.getElementById('total-customers').textContent = currentCustomers.length;
   alert(`${name} 고객이 추가되었습니다!`);
 }
+window.confirmAddCustomer = confirmAddCustomer;
 
 function renderCustomerList(customers, resultsMap = null) {
   // Always show the FULL database in the table view, ignoring coord filters
