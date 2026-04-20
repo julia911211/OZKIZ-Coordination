@@ -101,69 +101,86 @@ const customerSearch = document.querySelector('#customer-search');
 const dateFrom = document.querySelector('#date-from');
 const dateTo = document.querySelector('#date-to');
 
-async function fetchAllData() {
-  console.log('Supabase에서 데이터를 불러오는 중...');
-  try {
-    // Recursive fetch function to bypass 1000 row limit
-    const fetchAllRows = async (table) => {
-      let allData = [];
-      let from = 0;
-      const step = 1000;
-      while (true) {
-        const { data, error } = await supabase.from(table).select('*').range(from, from + step - 1);
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        allData.push(...data);
-        if (data.length < step) break;
-        from += step;
-      }
-      return allData;
-    };
+function mapInventory(invData) {
+  return invData.map(item => ({
+    '상품명': item.name,
+    '공급처상품명': item.product_code,
+    '원가': item.cost,
+    '가용재고': item.stock,
+    '복종': item.sub_category,
+    '복종(대카테고리)': item.big_category,
+    '시즌': item.season,
+    '이미지URL': item.image_url,
+    '옵션': item.product_option
+  }));
+}
 
-    const [invData, custData, histData] = await Promise.all([
-      fetchAllRows('inventory'),
+function mapCustomers(custData) {
+  return custData.map(c => ({
+    name: c.name,
+    phone: c.phone,
+    displayPhone: c.phone,
+    regId: c.reg_id,
+    gender: c.gender,
+    clothSize: c.cloth_size,
+    shoeSize: c.shoe_size,
+    payDay: c.pay_day,
+    childCount: c.child_count,
+    preference: c.preference
+  }));
+}
+
+function mapHistory(histData) {
+  const map = {};
+  histData.forEach(h => {
+    if (!map[h.phone]) map[h.phone] = [];
+    map[h.phone].push(h.product_name);
+  });
+  return map;
+}
+
+async function fetchAllRows(table) {
+  let allData = [];
+  let from = 0;
+  const step = 1000;
+  while (true) {
+    const { data, error } = await supabase.from(table).select('*').range(from, from + step - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allData.push(...data);
+    if (data.length < step) break;
+    from += step;
+  }
+  return allData;
+}
+
+async function fetchAllData() {
+  try {
+    // 재고: IndexedDB 캐시 먼저 → 즉시 표시, Supabase는 백그라운드 갱신
+    const cachedInv = await idbStorage.get('inventory');
+    if (cachedInv && cachedInv.length > 0) {
+      currentInventory = mapInventory(cachedInv);
+      console.log(`재고 캐시 로드: ${currentInventory.length}개 (백그라운드 갱신 중...)`);
+    }
+
+    // 고객 + 히스토리는 항상 최신 데이터 (빠름 - 소량)
+    const [custData, histData] = await Promise.all([
       fetchAllRows('customers'),
-      fetchAllRows('history')
+      fetchAllRows('history'),
     ]);
 
-    if (invData && invData.length > 0) {
-      currentInventory = invData.map(item => ({
-        '상품명': item.name,
-        '공급처상품명': item.product_code,
-        '원가': item.cost,
-        '가용재고': item.stock,
-        '복종': item.sub_category,
-        '복종(대카테고리)': item.big_category,
-        '시즌': item.season,
-        '이미지URL': item.image_url,
-        '옵션': item.product_option
-      }));
-      console.log(`Inventory loaded: ${currentInventory.length} items`);
-    }
+    if (custData && custData.length > 0) currentCustomers = mapCustomers(custData);
+    if (histData && histData.length > 0) currentHistoryMap = mapHistory(histData);
 
-    if (custData && custData.length > 0) {
-      currentCustomers = custData.map(c => ({
-        name: c.name,
-        phone: c.phone,
-        displayPhone: c.phone,
-        regId: c.reg_id,
-        gender: c.gender,
-        clothSize: c.cloth_size,
-        shoeSize: c.shoe_size,
-        payDay: c.pay_day,
-        childCount: c.child_count,
-        preference: c.preference
-      }));
-    }
+    // 재고 백그라운드 갱신 (캐시 있으면 UI 안 막음)
+    fetchAllRows('inventory').then(invData => {
+      if (invData && invData.length > 0) {
+        currentInventory = mapInventory(invData);
+        idbStorage.set('inventory', invData); // 캐시 저장
+        console.log(`재고 Supabase 갱신 완료: ${currentInventory.length}개`);
+      }
+    }).catch(e => console.warn('재고 백그라운드 갱신 실패:', e));
 
-    if (histData && histData.length > 0) {
-      const map = {};
-      histData.forEach(h => {
-        if (!map[h.phone]) map[h.phone] = [];
-        map[h.phone].push(h.product_name);
-      });
-      currentHistoryMap = map;
-    }
   } catch (err) {
     console.error('Supabase 연동 실패:', err);
   }
@@ -237,11 +254,14 @@ async function initApp() {
 }
 
 function autoGenerateCoordinations() {
+  if (currentInventory.length === 0) return;
   const season = seasonSelect?.value || '봄/가을';
-  lastCoordResults = [];
-  sessionRejectedMap = {};
+  // 필터된 고객만 코디 생성 (전체 X → 빠름)
+  const filtered = applyMainFilters(currentCustomers);
   const globalUsed = new Set();
-  currentCustomers.forEach(c => {
+  filtered.forEach(c => {
+    // 이미 생성된 경우 스킵
+    if (lastCoordResults.find(r => r.customerPhone === c.phone)) return;
     const count = c.childCount || 1;
     const sets = [];
     for (let i = 0; i < count; i++) {
@@ -249,7 +269,7 @@ function autoGenerateCoordinations() {
     }
     lastCoordResults.push({ customerPhone: c.phone, sets });
   });
-  console.log(`코디 자동 생성 완료: ${lastCoordResults.length}명`);
+  console.log(`코디 자동 생성 완료: ${filtered.length}명`);
 }
 
 initApp();
@@ -1459,6 +1479,8 @@ runBtn.addEventListener('click', () => {
 customerSearch.addEventListener('input', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
 
 const onDateChange = () => {
+  lastCoordResults = []; // 날짜 바뀌면 기존 결과 초기화
+  sessionRejectedMap = {};
   autoGenerateCoordinations();
   renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
   updateStats();
