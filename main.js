@@ -76,6 +76,10 @@ let currentOverrides = loadFromLocal(STORAGE_KEYS.OVERRIDES, {});
 let lastCoordResults = [];
 let sessionRejectedMap = {}; // Track rejected items per customer in THIS session
 
+// 오늘 확정된 코디 목록 (날짜 바뀌면 자동 초기화)
+const TODAY_KEY = `ozkids_confirmed_${new Date().toISOString().slice(0, 10)}`;
+let sessionConfirmed = loadFromLocal(TODAY_KEY, []); // [{customerPhone, customerName, items:[{name,option}]}]
+
 function applyOverrides(customers) {
   return customers.map(c => {
     const override = currentOverrides[c.phone];
@@ -1311,22 +1315,34 @@ function renderCustomerList(customers, resultsMap = null) {
       if (confirmed) {
         if (!currentHistoryMap[c.phone]) currentHistoryMap[c.phone] = [];
 
+        // 이번 확정에서 코디된 아이템 목록
+        const confirmedItems = [];
+
         entry.sets.forEach(set => {
           set.items.forEach(it => {
             const name = it['상품명'];
+            const option = it['옵션'] || '';
+            // 이력 저장
             if (!currentHistoryMap[c.phone].includes(name)) {
               currentHistoryMap[c.phone].push(name);
-              // Supabase Sync
               supabase.from('history').insert({ phone: c.phone, product_name: name })
-                .then(({ error }) => {
-                  if (error) console.error('이력 저장 실패:', error);
-                });
+                .then(({ error }) => { if (error) console.error('이력 저장 실패:', error); });
             }
+            // CSV용 아이템 누적
+            confirmedItems.push({ name, option });
           });
         });
 
+        // 오늘 확정 목록에 추가 (같은 고객은 덮어쓰기)
+        const existingIdx = sessionConfirmed.findIndex(x => x.customerPhone === c.phone);
+        const confirmedEntry = { customerPhone: c.phone, customerName: c.name, items: confirmedItems };
+        if (existingIdx !== -1) sessionConfirmed[existingIdx] = confirmedEntry;
+        else sessionConfirmed.push(confirmedEntry);
+        saveToLocal(TODAY_KEY, sessionConfirmed);
+        updateCsvBtn();
+
         saveToLocal(STORAGE_KEYS.HISTORY, currentHistoryMap);
-        alert('모든 코디가 확정되어 클라우드에 저장되었습니다.');
+        showToast(`✅ ${c.name} 코디 확정 완료`);
 
         renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
       }
@@ -1512,6 +1528,105 @@ document.getElementById('show-all-btn')?.addEventListener('click', () => {
 
 // 고객 추가 버튼
 document.getElementById('add-customer-btn')?.addEventListener('click', openAddCustomerModal);
+
+// ─── CSV 다운로드 ─────────────────────────────────────────────────────────────
+function updateCsvBtn() {
+  const btn = document.getElementById('csv-download-btn');
+  if (!btn) return;
+  btn.style.display = sessionConfirmed.length > 0 ? 'inline-block' : 'none';
+  btn.textContent = `⬇️ 발주 CSV (${sessionConfirmed.length}명)`;
+}
+updateCsvBtn(); // 초기 상태 반영
+
+document.getElementById('csv-download-btn')?.addEventListener('click', async () => {
+  if (sessionConfirmed.length === 0) return;
+
+  const fromDate = dateFrom?.value;
+  const toDate = dateTo?.value;
+  if (!fromDate || !toDate) {
+    alert('날짜 범위를 선택해주세요.');
+    return;
+  }
+
+  const btn = document.getElementById('csv-download-btn');
+  btn.textContent = '⏳ 주문 조회 중...';
+  btn.disabled = true;
+
+  try {
+    // 카페24에서 해당 기간 구독 주문 조회
+    const res = await fetch(`/api/cafe24/fetch-orders?start_date=${fromDate}&end_date=${toDate}`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || '주문 조회 실패');
+
+    const orders = json.orders || [];
+
+    // 전화번호로 주문 매핑
+    const orderByPhone = {};
+    orders.forEach(o => {
+      const phone = o.receiver_cellphone.replace(/[^0-9]/g, '');
+      if (phone) orderByPhone[phone] = o;
+    });
+
+    // 오늘 날짜 6자리 (상품코드)
+    const productCode = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+
+    // CSV 행 생성
+    const rows = [['주문번호', '상품코드', '성함', '연락처', '우편번호', '주소', '판매금액', '상품명', '옵션', '메모']];
+    let matched = 0;
+
+    sessionConfirmed.forEach(({ customerPhone, customerName, items }) => {
+      const phone = customerPhone.replace(/[^0-9]/g, '');
+      const order = orderByPhone[phone];
+      if (!order) {
+        console.warn(`주문 미매칭: ${customerName} (${phone})`);
+        return; // 주문 없으면 제외 (카드 실패 등)
+      }
+      matched++;
+      items.forEach(({ name, option }) => {
+        // 옵션에서 색상:사이즈 형태 정리
+        const cleanOption = (option || '').replace(/^[^:]+:/, '').trim();
+        rows.push([
+          order.order_id,
+          productCode,
+          order.receiver_name,
+          order.receiver_cellphone,
+          order.receiver_zipcode,
+          order.receiver_address,
+          '50000',
+          name,
+          cleanOption,
+          '',
+        ]);
+      });
+    });
+
+    if (matched === 0) {
+      alert('매칭된 주문이 없습니다. 날짜 범위를 확인해주세요.');
+      return;
+    }
+
+    // CSV 다운로드
+    const csvContent = rows.map(r =>
+      r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
+
+    const bom = '\uFEFF'; // 한글 깨짐 방지
+    const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `발주서_${fromDate}_${toDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast(`✅ CSV 다운로드 완료 (${matched}명, ${rows.length - 1}개 상품)`);
+  } catch (e) {
+    alert(`오류: ${e.message}`);
+  } finally {
+    updateCsvBtn();
+    btn.disabled = false;
+  }
+});
 
 // 고객 DB 탭 검색창
 const customerDbSearch = document.getElementById('customer-db-search');
