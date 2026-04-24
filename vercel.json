@@ -1,8 +1,21 @@
 {
+  "installCommand": "npm install",
   "crons": [
     {
       "path": "/api/cafe24/sync",
       "schedule": "0 23 * * *"
+    },
+    {
+      "path": "/api/cafe24/sync-inventory",
+      "schedule": "0 23 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/cafe24/fetch-reviews.js": {
+      "maxDuration": 60
+    },
+    "api/cafe24/sync-inventory.js": {
+      "maxDuration": 300
+    }
+  }
 }
