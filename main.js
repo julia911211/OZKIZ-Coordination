@@ -3,6 +3,9 @@ import { inventory as mockInventory, customers as mockCustomers, history as mock
 import { coordinate, regenItem, addExtraItem } from './engine.js'
 import Papa from 'papaparse'
 import { supabase } from './supabase.js'
+import { Chart, ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend, PieController, BarController } from 'chart.js'
+import ChartDataLabels from 'chartjs-plugin-datalabels'
+Chart.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend, PieController, BarController, ChartDataLabels)
 
 // IndexedDB Helper for large data (Inventory)
 const idbStorage = {
@@ -76,6 +79,75 @@ let currentOverrides = loadFromLocal(STORAGE_KEYS.OVERRIDES, {});
 let lastCoordResults = [];
 let sessionRejectedMap = {}; // Track rejected items per customer in THIS session
 
+// 카페24 실주문 맵 (날짜별 fetch 후 저장)
+let currentOrdersMap = { byPhone: {}, byName: {} };
+let ordersLoaded = false;
+
+async function fetchAndStoreOrders(startDate, endDate) {
+  if (!startDate || !endDate) {
+    currentOrdersMap = { byPhone: {}, byName: {} };
+    ordersLoaded = false;
+    return;
+  }
+  try {
+    const res = await fetch(`/api/cafe24/fetch-orders?start_date=${startDate}&end_date=${endDate}`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || '주문 조회 실패');
+    const orders = json.orders || [];
+    const byPhone = {}, byName = {}, byRegId = {};
+    orders.forEach(o => {
+      // 수령자 전화 (마스킹될 수 있음)
+      const recPhone = (o.receiver_cellphone || '').replace(/[^0-9]/g, '');
+      if (recPhone) byPhone[recPhone] = o;
+      // 신청자(구매자) 전화 - 마스킹 안 됨
+      const buyPhone = (o.buyer_cellphone || '').replace(/[^0-9]/g, '');
+      if (buyPhone) byPhone[buyPhone] = o;
+      // 이름 매칭
+      const recName = (o.receiver_name || '').trim();
+      if (recName) byName[recName] = o;
+      const buyName = (o.buyer_name || '').trim();
+      if (buyName) byName[buyName] = o;
+      // 구독 ID 매칭
+      const subId = (o.subscription_id || '').trim();
+      if (subId) byRegId[subId] = o;
+    });
+    currentOrdersMap = { byPhone, byName, byRegId };
+    ordersLoaded = true;
+    console.log(`[주문] ${startDate} 기준 ${orders.length}건 로드 (수신자: ${orders.map(o=>o.receiver_name).join(', ')})`);
+
+    // member_id를 currentCustomers에 반영 + Supabase 업데이트
+    const memberIdUpdates = [];
+    orders.forEach(o => {
+      if (!o.member_id) return;
+      const buyPhone = (o.buyer_cellphone || '').replace(/[^0-9]/g, '');
+      const recPhone = (o.receiver_cellphone || '').replace(/[^0-9]/g, '');
+      const recName = (o.receiver_name || '').trim();
+      const buyName = (o.buyer_name || '').trim();
+      const customer = currentCustomers.find(c => {
+        const cp = (c.phone || '').replace(/[^0-9]/g, '');
+        const cName = c.name?.trim() || '';
+        const cParenName = (cName.match(/\(([^)]+)\)/) || [])[1]?.trim() || '';
+        return (buyPhone && cp === buyPhone) ||
+               (recPhone && cp === recPhone) ||
+               cName === recName || cName === buyName ||
+               (cParenName && (cParenName === recName || cParenName === buyName));
+      });
+      if (customer && !customer.memberId) {
+        customer.memberId = o.member_id;
+        if (customer.id) memberIdUpdates.push({ id: customer.id, member_id: o.member_id });
+      }
+    });
+    // Supabase에 member_id 저장 (비동기, 오류 무시)
+    memberIdUpdates.forEach(({ id, member_id }) => {
+      supabase.from('customers').update({ member_id }).eq('id', id).then(() => {});
+    });
+  } catch (e) {
+    console.warn('주문 조회 실패:', e.message);
+    currentOrdersMap = { byPhone: {}, byName: {} };
+    ordersLoaded = false;
+  }
+}
+
 // 오늘 확정된 코디 목록 (날짜 바뀌면 자동 초기화)
 const TODAY_KEY = `ozkids_confirmed_${new Date().toISOString().slice(0, 10)}`;
 let sessionConfirmed = loadFromLocal(TODAY_KEY, []); // [{customerPhone, customerName, items:[{name,option}]}]
@@ -90,12 +162,61 @@ function applyOverrides(customers) {
   });
 }
 
-const runBtn = document.querySelector('#run-btn');
 const inventoryUpload = document.querySelector('#inventory-upload');
 const historyUpload = document.querySelector('#history-upload');
 const historyDataUpload = document.querySelector('#history-data-upload');
 const resultsContainer = document.querySelector('#results-container');
 const totalCustomersEl = document.querySelector('#total-customers');
+
+// 코디 미리보기 팝업
+const codiPreviewPopup = document.createElement('div');
+codiPreviewPopup.className = 'codi-preview-popup';
+codiPreviewPopup.style.display = 'none';
+document.body.appendChild(codiPreviewPopup);
+
+function showCodiPreview(triggerEl, card) {
+  const images = [...card.querySelectorAll('.card-right .item-thumb img')]
+    .map(img => ({ src: img.src, name: img.closest('.item-row')?.querySelector('.item-name')?.textContent.trim() || '' }))
+    .filter(({ src }) => src && !src.includes('placehold'));
+  if (images.length === 0) return;
+
+  codiPreviewPopup.innerHTML = `
+    <div class="codi-preview-label">코디 미리보기</div>
+    <div class="codi-preview-grid">
+      ${images.map(({ src, name }) => `
+        <div class="codi-preview-item">
+          <img src="${src}" onerror="this.src='https://placehold.co/90x90?text=?'">
+          <span>${name}</span>
+        </div>
+      `).join('')}
+    </div>
+    <div class="codi-preview-arrow"></div>
+  `;
+
+  codiPreviewPopup.style.display = 'block';
+  const trigRect = triggerEl.getBoundingClientRect();
+  const popW = codiPreviewPopup.offsetWidth;
+  const popH = codiPreviewPopup.offsetHeight;
+  let left = trigRect.left + window.scrollX + trigRect.width / 2 - popW / 2;
+  let top = trigRect.top + window.scrollY - popH - 14;
+  left = Math.max(8, Math.min(left, window.innerWidth - popW - 8));
+  if (top < window.scrollY + 8) top = trigRect.bottom + window.scrollY + 14;
+  codiPreviewPopup.style.left = left + 'px';
+  codiPreviewPopup.style.top = top + 'px';
+}
+
+resultsContainer.addEventListener('mouseenter', (e) => {
+  const trigger = e.target.closest('.save-btn, .total-bar');
+  if (!trigger) return;
+  const card = trigger.closest('.coord-card');
+  if (card) showCodiPreview(trigger, card);
+}, true);
+
+resultsContainer.addEventListener('mouseleave', (e) => {
+  const trigger = e.target.closest('.save-btn, .total-bar');
+  if (!trigger) return;
+  codiPreviewPopup.style.display = 'none';
+}, true);
 const totalProductsEl = document.querySelector('#total-products');
 const selectedDayStat = document.querySelector('#selected-day-stat');
 const selectedDayLabel = document.querySelector('#selected-day-label');
@@ -109,6 +230,7 @@ function mapInventory(invData) {
   return invData.map(item => ({
     '상품명': item.name,
     '공급처상품명': item.product_code,
+    '바코드': item.barcode || '',
     '원가': item.cost,
     '가용재고': item.stock,
     '복종': item.sub_category,
@@ -121,10 +243,12 @@ function mapInventory(invData) {
 
 function mapCustomers(custData) {
   return custData.map(c => ({
+    id: c.id,
     name: c.name,
     phone: c.phone,
     displayPhone: c.phone,
     regId: c.reg_id,
+    memberId: c.member_id || '',
     gender: c.gender,
     clothSize: c.cloth_size,
     shoeSize: c.shoe_size,
@@ -223,16 +347,20 @@ async function initApp() {
 
   currentCustomers = currentCustomers.map(c => {
     return {
+      id: c.id,
       name: c.name || '이름없음',
       phone: c.phone,
       displayPhone: c.displayPhone || c.phone,
       regId: c.regId || '-',
+      memberId: c.memberId || '',
       gender: c.gender || '-',
       clothSize: c.clothSize || c.size || '-',
       shoeSize: c.shoeSize || '-',
       payDay: c.payDay || '-',
       childCount: c.name?.includes('★') ? 2 : (c.childCount || 1),
-      preference: c.preference || c.memo || '없음'
+      preference: c.preference || c.memo || '없음',
+      zipcode: c.zipcode || '',
+      address: c.address || '',
     };
   });
 
@@ -247,12 +375,15 @@ async function initApp() {
   if (dateFrom) dateFrom.value = todayStr;
   if (dateTo) dateTo.value = todayStr;
 
+  // 오늘 실주문 미리 fetch
+  await fetchAndStoreOrders(todayStr, todayStr);
+
   if (currentCustomers.length > 0) {
-    // 데이터 로드 완료 후 오늘 결제 대상자 코디 자동 생성
     if (currentInventory.length > 0) {
       autoGenerateCoordinations();
     }
     renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
+    updateStats();
   } else {
     updateStats();
     renderCustomerList(currentCustomers);
@@ -342,10 +473,14 @@ menuItems.forEach(item => {
     });
 
     // Update Header Title
-    if (targetTab === 'coord') activeViewTitle.textContent = '옷체부 자동 코디';
+    if (targetTab === 'coord') {
+      activeViewTitle.textContent = '옷체부 자동 코디';
+      renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
+    }
     if (targetTab === 'cust-list') {
       activeViewTitle.textContent = '고객 DB';
-      renderCustomerList(currentCustomers, lastCoordResults);
+      renderCustomerTable(currentCustomers);
+      renderDbCharts(currentCustomers);
     }
   });
 });
@@ -599,9 +734,15 @@ const bigCategory =
        findPartial(['공급처상품명', '상품코드', '바코드', '코드']) ??
        '').toString().trim();
 
+    const barcode =
+      (findExact(['바코드', '품목코드', '자체품목코드']) ??
+       findPartial(['바코드', '품목코드']) ??
+       '').toString().trim();
+
     return {
       '상품명': (item['상품명'] || '').toString().trim(),
       '공급처상품명': (item['공급처상품명'] || '').toString().trim(),
+      '바코드': barcode,
       '원가': parseInt(((item['원가'] || 0).toString()).replace(/[^0-9]/g, '') || 0),
       '가용재고': (item['가용재고'] || '').toString().trim(),
       '복종': (item['복종'] || '기타').toString().trim(),
@@ -641,7 +782,8 @@ console.log(
         season: (item['시즌'] || '사계절').toString().trim(),
         image_url: (item['이미지URL'] || '').toString().trim(),
         product_option: (item['옵션'] || '').toString().trim(),
-        product_code: (item['공급처상품명'] || '').toString().trim()
+        product_code: (item['공급처상품명'] || '').toString().trim(),
+        barcode: (item['바코드'] || '').toString().trim()
       })).filter(row => row.name !== ''); // Ensure name is never empty
 
       // Pre-flight Connection Test
@@ -687,7 +829,8 @@ console.log(
       alert(`${currentInventory.length}개의 재고 데이터를 불러왔습니다. 이제 모든 동료와 공유됩니다!`);
 
       if (currentCustomers.length > 0) {
-        runBtn.click();
+        autoGenerateCoordinations();
+        renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
       }
     }
   });
@@ -703,6 +846,110 @@ const getCategoryOptions = (inventory) => {
   });
   return map;
 };
+
+// ─── 고객 DB 통계 차트 ────────────────────────────────────────────────────────
+let _chartGender = null, _chartCloth = null, _chartShoe = null;
+
+function renderDbCharts(customers) {
+  // 성별 집계 (남아/여아만)
+  const genderCount = { '남아': 0, '여아': 0 };
+  customers.forEach(c => {
+    const g = (c.gender || '').trim();
+    if (g === '남아') genderCount['남아']++;
+    else if (g === '여아') genderCount['여아']++;
+  });
+
+  // 사이즈를 5단위 버킷으로 묶는 헬퍼
+  const bucketSize = (val, unit) => {
+    const n = parseInt(val);
+    if (isNaN(n)) return null;
+    return Math.round(n / unit) * unit;
+  };
+
+  // 의류 사이즈 집계 (5단위)
+  const clothCount = {};
+  customers.forEach(c => {
+    const s = bucketSize(c.clothSize, 5);
+    if (s) clothCount[s] = (clothCount[s] || 0) + 1;
+  });
+  const clothLabels = Object.keys(clothCount).map(Number).sort((a, b) => a - b).map(String);
+  const clothData = clothLabels.map(k => clothCount[k]);
+
+  // 슈즈 사이즈 집계 (5단위)
+  const shoeCount = {};
+  customers.forEach(c => {
+    const s = bucketSize(c.shoeSize, 5);
+    if (s && s > 0) shoeCount[s] = (shoeCount[s] || 0) + 1;
+  });
+  const shoeLabels = Object.keys(shoeCount).map(Number).sort((a, b) => a - b).map(String);
+  const shoeData = shoeLabels.map(k => shoeCount[k]);
+
+  const barDatalabels = {
+    display: true,
+    anchor: 'end', align: 'top',
+    font: { size: 10, weight: '700' },
+    color: '#374151',
+    formatter: v => v > 0 ? v : ''
+  };
+
+  // 성별 파이 차트
+  const gCtx = document.getElementById('chart-gender')?.getContext('2d');
+  if (gCtx) {
+    if (_chartGender) _chartGender.destroy();
+    _chartGender = new Chart(gCtx, {
+      type: 'pie',
+      data: {
+        labels: ['남아', '여아'],
+        datasets: [{ data: [genderCount['남아'], genderCount['여아']], backgroundColor: ['#3b82f6', '#f472b6'], borderWidth: 0 }]
+      },
+      options: {
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 8 } },
+          datalabels: {
+            display: true, color: '#fff', font: { size: 12, weight: '700' },
+            formatter: (v, ctx) => {
+              const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+              return total ? `${v}\n(${Math.round(v/total*100)}%)` : '';
+            }
+          }
+        },
+        maintainAspectRatio: true
+      }
+    });
+  }
+
+  // 의류 사이즈 바 차트
+  const cCtx = document.getElementById('chart-cloth')?.getContext('2d');
+  if (cCtx) {
+    if (_chartCloth) _chartCloth.destroy();
+    _chartCloth = new Chart(cCtx, {
+      type: 'bar',
+      data: { labels: clothLabels, datasets: [{ data: clothData, backgroundColor: '#6366f1', borderRadius: 4, borderSkipped: false }] },
+      options: {
+        layout: { padding: { top: 18 } },
+        plugins: { legend: { display: false }, datalabels: barDatalabels },
+        scales: { y: { display: false }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } },
+        maintainAspectRatio: true
+      }
+    });
+  }
+
+  // 슈즈 사이즈 바 차트
+  const sCtx = document.getElementById('chart-shoe')?.getContext('2d');
+  if (sCtx) {
+    if (_chartShoe) _chartShoe.destroy();
+    _chartShoe = new Chart(sCtx, {
+      type: 'bar',
+      data: { labels: shoeLabels, datasets: [{ data: shoeData, backgroundColor: '#10b981', borderRadius: 4, borderSkipped: false }] },
+      options: {
+        layout: { padding: { top: 18 } },
+        plugins: { legend: { display: false }, datalabels: barDatalabels },
+        scales: { y: { display: false }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } },
+        maintainAspectRatio: true
+      }
+    });
+  }
+}
 
 function renderCustomerTable(customers) {
   const tableBody = document.querySelector('#customer-table-body');
@@ -728,7 +975,7 @@ function renderCustomerTable(customers) {
   sorted.forEach(c => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="color:var(--primary); font-weight:600; cursor:pointer; text-decoration:underline;" onclick="openEditCustomerModal('${c.phone}')" title="클릭하여 수정">${c.regId || '-'}</td>
+      <td style="color:var(--primary); font-weight:600; cursor:pointer; text-decoration:underline;" onclick="openEditCustomerModal(${c.id})" title="클릭하여 수정">${c.regId || '-'}</td>
       <td style="font-weight:700;">${c.name}</td>
       <td>${formatPhone(c.displayPhone || c.phone)}</td>
       <td>${c.zipcode || '-'}</td>
@@ -739,7 +986,7 @@ function renderCustomerTable(customers) {
       <td>매월 ${c.payDay}일</td>
       <td>${c.childCount}명</td>
       <td>
-        <button onclick="deleteCustomer('${c.phone}')" style="background:none;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;color:#94a3b8;cursor:pointer;" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#94a3b8'">삭제</button>
+        <button onclick="deleteCustomer(${c.id})" style="background:none;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;color:#94a3b8;cursor:pointer;" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#94a3b8'">삭제</button>
       </td>
     `;
     tableBody.appendChild(tr);
@@ -747,11 +994,11 @@ function renderCustomerTable(customers) {
 }
 
 // ─── 고객 삭제 ────────────────────────────────────────────────────────────────
-function deleteCustomer(phone) {
+function deleteCustomer(customerId) {
   if (!confirm('이 고객을 삭제하시겠습니까?')) return;
-  currentCustomers = currentCustomers.filter(c => c.phone !== phone);
+  currentCustomers = currentCustomers.filter(c => c.id !== customerId);
   saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
-  supabase.from('customers').delete().eq('phone', phone).then(({ error }) => {
+  supabase.from('customers').delete().eq('id', customerId).then(({ error }) => {
     if (error) console.error('고객 삭제 실패:', error);
   });
   renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
@@ -823,8 +1070,8 @@ function showToast(msg, type = 'success') {
   setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
 }
 
-// Supabase 고객 저장 공통 함수 (insert 실패 시 콘솔 상세 로그)
-async function saveCustomerToSupabase(row) {
+// Supabase 신규 고객 insert 함수 (id 반환)
+async function insertCustomerToSupabase(row) {
   const toN = v => (v && v !== '-') ? v : null;
   const toI = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
   const payload = {
@@ -840,9 +1087,9 @@ async function saveCustomerToSupabase(row) {
     zipcode: row.zipcode || null,
     address: row.address || null,
   };
-  const { error } = await supabase.from('customers').upsert(payload, { onConflict: 'phone' });
+  const { data, error } = await supabase.from('customers').insert(payload).select('id').single();
   if (error) console.error('Supabase 저장 오류 상세:', JSON.stringify(error));
-  return error;
+  return { error, id: data?.id ?? null };
 }
 
 async function confirmAddCustomer() {
@@ -875,19 +1122,22 @@ async function confirmAddCustomer() {
   renderCustomerList(currentCustomers, lastCoordResults);
   document.getElementById('total-customers').textContent = currentCustomers.length;
 
-  // 2. Supabase 저장
-  const error = await saveCustomerToSupabase(newCustomer);
+  // 2. Supabase insert (id 받아서 currentCustomers에 반영)
+  const { error, id } = await insertCustomerToSupabase(newCustomer);
   if (error) {
     showToast(`⚠️ 클라우드 저장 실패: ${error.message}`, 'error');
   } else {
+    // 방금 push한 마지막 고객에 id 부여 (수정/삭제 시 필요)
+    const lastIdx = currentCustomers.length - 1;
+    if (lastIdx >= 0 && id) currentCustomers[lastIdx].id = id;
     showToast(`✅ ${name} 고객 저장 완료`);
   }
 }
 window.confirmAddCustomer = confirmAddCustomer;
 
 // ─── 고객 수정 모달 ───────────────────────────────────────────────────────────
-function openEditCustomerModal(phone) {
-  const c = currentCustomers.find(x => x.phone === phone);
+function openEditCustomerModal(customerId) {
+  const c = currentCustomers.find(x => x.id === customerId);
   if (!c) return;
 
   const existing = document.getElementById('edit-customer-modal');
@@ -930,7 +1180,7 @@ function openEditCustomerModal(phone) {
         <textarea id="edit-preference" style="${inputStyle}height:80px;resize:vertical;">${c.preference && c.preference !== '없음' ? c.preference : ''}</textarea>
       </div>
       <div style="display:flex;gap:0.75rem;margin-top:1.5rem;">
-        <button onclick="confirmEditCustomer('${phone}')" style="flex:1;background:var(--primary);color:white;border:none;border-radius:0.75rem;padding:0.85rem;font-size:1rem;font-weight:700;cursor:pointer;">저장하기</button>
+        <button onclick="confirmEditCustomer(${c.id})" style="flex:1;background:var(--primary);color:white;border:none;border-radius:0.75rem;padding:0.85rem;font-size:1rem;font-weight:700;cursor:pointer;">저장하기</button>
         <button onclick="document.getElementById('edit-customer-modal').remove()" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:0.75rem;padding:0.85rem;font-size:1rem;font-weight:700;cursor:pointer;">취소</button>
       </div>
     </div>
@@ -939,11 +1189,14 @@ function openEditCustomerModal(phone) {
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 }
 
-async function confirmEditCustomer(originalPhone) {
+async function confirmEditCustomer(customerId) {
   const get = id => document.getElementById(id)?.value.trim() || '';
   const name = get('edit-name');
   const newPhone = normalizePhone(get('edit-phone'));
   if (!name || !newPhone) { alert('이름과 연락처는 필수입니다.'); return; }
+
+  const toN = v => (v && v !== '-') ? v : null;
+  const toI = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
 
   const updated = {
     regId: get('edit-regId') || '-',
@@ -960,7 +1213,7 @@ async function confirmEditCustomer(originalPhone) {
     address: get('edit-address') || '',
   };
 
-  const idx = currentCustomers.findIndex(c => c.phone === originalPhone);
+  const idx = currentCustomers.findIndex(c => c.id === customerId);
   if (idx !== -1) currentCustomers[idx] = { ...currentCustomers[idx], ...updated };
   saveToLocal(STORAGE_KEYS.CUSTOMERS, currentCustomers);
 
@@ -968,11 +1221,21 @@ async function confirmEditCustomer(originalPhone) {
   document.getElementById('edit-customer-modal').remove();
   renderCustomerList(currentCustomers, lastCoordResults);
 
-  // Supabase 저장 (phone이 바뀐 경우 기존 삭제 후 upsert)
-  if (newPhone !== originalPhone) {
-    await supabase.from('customers').delete().eq('phone', originalPhone);
-  }
-  const error = await saveCustomerToSupabase(updated);
+  // Supabase: id 기준으로 update
+  const payload = {
+    phone: newPhone,
+    name,
+    reg_id: toN(updated.regId),
+    gender: toN(updated.gender),
+    cloth_size: toN(updated.clothSize),
+    shoe_size: toN(updated.shoeSize),
+    pay_day: toI(updated.payDay),
+    child_count: updated.childCount || 1,
+    preference: updated.preference || '없음',
+    zipcode: updated.zipcode || null,
+    address: updated.address || null,
+  };
+  const { error } = await supabase.from('customers').update(payload).eq('id', customerId);
   if (error) {
     showToast(`⚠️ 클라우드 저장 실패: ${error.message}`, 'error');
   } else {
@@ -1003,7 +1266,7 @@ function renderCustomerList(customers, resultsMap = null) {
 
   customers.forEach(c => {
     const card = document.createElement('div');
-    card.className = 'coord-card clickable-card';
+    card.className = 'coord-card';
     if (c.childCount === 2) card.classList.add('multi-child-card');
 
     const history = currentHistoryMap[c.phone] || [];
@@ -1093,6 +1356,13 @@ function renderCustomerList(customers, resultsMap = null) {
       `;
     }
 
+    const cPhone = (c.phone || '').replace(/[^0-9]/g, '');
+    const cRegId = (c.regId || '').toString().trim();
+    const cName = c.name?.trim() || '';
+    const cParenName = (cName.match(/\(([^)]+)\)/) || [])[1]?.trim() || '';
+    const cOrder = currentOrdersMap.byPhone[cPhone] || currentOrdersMap.byRegId[cRegId] ||
+      currentOrdersMap.byName[cName] || (cParenName && currentOrdersMap.byName[cParenName]);
+
     card.innerHTML = `
       <div class="card-left">
         <div class="card-header">
@@ -1113,10 +1383,17 @@ function renderCustomerList(customers, resultsMap = null) {
           <button class="save-btn" data-phone="${c.phone}">✅ 코디 확정 (이력 저장)</button>
           <button class="regen-card-btn" data-regen-phone="${c.phone}" title="이 고객 코디만 재생성">🔄</button>
         </div>
-        <div class="card-hint">클릭해서 과거 이력 보기</div>
+        <div class="history-review-row">
+          <button class="history-toggle-btn">📋 과거 이력 보기</button>
+          ${c.memberId ? `<button class="review-toggle-btn" data-member-id="${c.memberId}" data-reg-id="${c.regId || ''}" data-customer-name="${c.name}">⭐ 리뷰 보기</button>` : '<div></div>'}
+        </div>
       </div>
       <div class="card-right">
+        ${cOrder?.order_id ? `<div class="order-id-badge">주문번호 : ${cOrder.order_id}</div>` : ''}
         ${setsHtml}
+      </div>
+      <div class="review-section" style="display:none;">
+        <div class="review-section-inner">로딩 중...</div>
       </div>
       <div class="history-section" style="display: none;">
         <h4 class="history-title">과거 이력 (${history.length}개)</h4>
@@ -1410,10 +1687,60 @@ function renderCustomerList(customers, resultsMap = null) {
       });
     });
 
-    card.addEventListener('click', () => {
+    card.querySelector('.history-toggle-btn').addEventListener('click', () => {
       const section = card.querySelector('.history-section');
-      section.style.display = section.style.display === 'block' ? 'none' : 'block';
+      const btn = card.querySelector('.history-toggle-btn');
+      const isOpen = section.style.display === 'block';
+      section.style.display = isOpen ? 'none' : 'block';
+      btn.textContent = isOpen ? '📋 과거 이력 보기' : '📋 과거 이력 닫기';
     });
+
+    // 리뷰 보기 버튼
+    const reviewBtn = card.querySelector('.review-toggle-btn');
+    if (reviewBtn) {
+      reviewBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const reviewSection = card.querySelector('.review-section');
+        const inner = card.querySelector('.review-section-inner');
+        if (reviewSection.style.display === 'block') {
+          reviewSection.style.display = 'none';
+          reviewBtn.textContent = '⭐ 리뷰 보기';
+          return;
+        }
+        reviewSection.style.display = 'block';
+        reviewBtn.textContent = '⭐ 리뷰 닫기';
+        inner.innerHTML = '<div style="padding:12px;color:#9ca3af;font-size:13px;">불러오는 중...</div>';
+        try {
+          const memberId = reviewBtn.dataset.memberId;
+          const reviewUrl = `/api/cafe24/fetch-reviews?member_id=${encodeURIComponent(memberId)}&product_no=6341`;
+          const res = await fetch(reviewUrl);
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error);
+          const reviews = json.reviews || [];
+          const debugHtml = json.debug
+            ? `<div style="color:#92400e;font-size:11px;padding:6px 8px;background:#fef3c7;border-radius:4px;margin-top:6px;">🔍 ${json.debug}</div>`
+            : '';
+          if (reviews.length === 0) {
+            inner.innerHTML = `<div class="review-empty">작성된 리뷰가 없습니다.</div>${debugHtml}`;
+          } else {
+            inner.innerHTML = reviews.map(r => `
+              <div class="review-item">
+                <div class="review-meta">
+                  <span class="review-stars">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+                  <span class="review-product">${r.product_name}</span>
+                  <span class="review-date">${r.created_date?.slice(0, 10) || ''}</span>
+                </div>
+                <div class="review-content">${r.content}</div>
+                ${r.images.length > 0 ? `<div class="review-images">${r.images.map(img => `<img src="${img}" class="review-img" onerror="this.style.display='none'">`).join('')}</div>` : ''}
+              </div>
+            `).join('') + debugHtml;
+          }
+        } catch (err) {
+          inner.innerHTML = `<div class="review-empty">리뷰 조회 실패: ${err.message}</div>`;
+        }
+      });
+      card.querySelector('.review-section').addEventListener('click', e => e.stopPropagation());
+    }
 
     const historyAddBtn = card.querySelector('.history-add-btn');
     const historyAddInput = card.querySelector('.history-add-input');
@@ -1492,43 +1819,51 @@ function getPayDaySet(fromStr, toStr) {
 
 function applyMainFilters(customers) {
   const query = customerSearch?.value.toLowerCase().trim() || '';
-  const payDays = getPayDaySet(dateFrom?.value, dateTo?.value);
 
   return customers.filter(c => {
-    const nameMatch = c.name.toLowerCase().includes(query);
-    const phoneMatch = c.phone.includes(query) || (c.displayPhone && c.displayPhone.includes(query));
-    if (!nameMatch && !phoneMatch) return false;
+    // 검색어 필터
+    if (query) {
+      const nameMatch = c.name.toLowerCase().includes(query);
+      const phoneMatch = c.phone.includes(query) || (c.displayPhone && c.displayPhone.includes(query));
+      if (!nameMatch && !phoneMatch) return false;
+    }
 
-    if (payDays.size === 0) return true; // 날짜 미설정 시 전체
+    // 날짜 미설정 시 전체 표시
+    if (!dateFrom?.value || !dateTo?.value) return true;
 
+    // 실주문 기준 필터 (카페24 주문 있는 고객만)
+    if (ordersLoaded) {
+      const phone = (c.phone || '').replace(/[^0-9]/g, '');
+      const regId = (c.regId || '').toString().trim();
+      const name = c.name?.trim() || '';
+      // 괄호 안 이름도 추출 (예: "이루리(임송희)" → "임송희")
+      const parenName = (name.match(/\(([^)]+)\)/) || [])[1]?.trim() || '';
+      return !!(
+        currentOrdersMap.byPhone[phone] ||
+        currentOrdersMap.byRegId[regId] ||
+        currentOrdersMap.byName[name] ||
+        (parenName && currentOrdersMap.byName[parenName])
+      );
+    }
+
+    // 주문 아직 로드 안 됨 → payDay 기준 fallback
+    const payDays = getPayDaySet(dateFrom?.value, dateTo?.value);
+    if (payDays.size === 0) return true;
     const day = parseInt(c.payDay);
     return !isNaN(day) && payDays.has(day);
   });
 }
 
-runBtn.addEventListener('click', () => {
-  const season = seasonSelect.value;
-  lastCoordResults = [];
-  sessionRejectedMap = {};
-  const globalUsed = new Set(); // Shared across all customers: oldest items assigned first
-  currentCustomers.forEach(c => {
-    const count = c.childCount || 1;
-    const sets = [];
-    for (let i = 0; i < count; i++) {
-      sets.push(coordinate(c, currentInventory, currentHistoryMap, season, globalUsed));
-    }
-    lastCoordResults.push({ customerPhone: c.phone, sets });
-  });
-  renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
-});
-
-// 코디 자동 생성은 initApp() 내 데이터 로드 완료 후 실행됨
 
 customerSearch.addEventListener('input', () => renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults));
 
-const onDateChange = () => {
-  lastCoordResults = []; // 날짜 바뀌면 기존 결과 초기화
+const onDateChange = async () => {
+  lastCoordResults = [];
   sessionRejectedMap = {};
+  const from = dateFrom?.value;
+  const to = dateTo?.value;
+  // 날짜 바뀌면 주문 다시 fetch
+  await fetchAndStoreOrders(from, to);
   autoGenerateCoordinations();
   renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
   updateStats();
@@ -1541,6 +1876,8 @@ document.getElementById('show-all-btn')?.addEventListener('click', () => {
   if (dateTo) dateTo.value = '';
   lastCoordResults = [];
   sessionRejectedMap = {};
+  currentOrdersMap = { byPhone: {}, byName: {} };
+  ordersLoaded = false;
   autoGenerateCoordinations();
   renderCustomerList(applyMainFilters(currentCustomers), lastCoordResults);
   updateStats();
@@ -1572,19 +1909,13 @@ document.getElementById('csv-download-btn')?.addEventListener('click', async () 
   btn.disabled = true;
 
   try {
-    // 카페24에서 해당 기간 구독 주문 조회
-    const res = await fetch(`/api/cafe24/fetch-orders?start_date=${fromDate}&end_date=${toDate}`);
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || '주문 조회 실패');
-
-    const orders = json.orders || [];
-
-    // 전화번호로 주문 매핑
-    const orderByPhone = {};
-    orders.forEach(o => {
-      const phone = o.receiver_cellphone.replace(/[^0-9]/g, '');
-      if (phone) orderByPhone[phone] = o;
-    });
+    // 이미 로드된 주문 재사용 (화면 필터와 동일한 날짜이므로 중복 fetch 불필요)
+    // 날짜가 바뀌었거나 주문 미로드 시 다시 fetch
+    if (!ordersLoaded) {
+      await fetchAndStoreOrders(fromDate, toDate);
+    }
+    const orderByPhone = currentOrdersMap.byPhone;
+    const orderByName = currentOrdersMap.byName;
 
     // 오늘 날짜 6자리 (상품코드)
     const productCode = new Date().toISOString().slice(2, 10).replace(/-/g, '');
@@ -1596,7 +1927,12 @@ document.getElementById('csv-download-btn')?.addEventListener('click', async () 
     let unmatched = 0;
     sessionConfirmed.forEach(({ customerPhone, customerName, items }) => {
       const phone = customerPhone.replace(/[^0-9]/g, '');
-      const order = orderByPhone[phone];
+      const customerInfo = currentCustomers.find(c => c.phone === phone);
+      const regId = (customerInfo?.regId || '').toString().trim();
+      const csvParenName = (customerName.match(/\(([^)]+)\)/) || [])[1]?.trim() || '';
+      // 전화번호 → reg_id → 이름 → 괄호 안 이름 순으로 매칭
+      const order = orderByPhone[phone] || (regId && currentOrdersMap.byRegId[regId]) ||
+        orderByName[customerName.trim()] || (csvParenName && orderByName[csvParenName]);
       if (!order) {
         console.warn(`주문 미매칭: ${customerName} (${phone})`);
         unmatched++;
@@ -1604,7 +1940,6 @@ document.getElementById('csv-download-btn')?.addEventListener('click', async () 
         matched++;
       }
       // 주문 없어도 포함 (빈칸으로)
-      const customerInfo = currentCustomers.find(c => c.phone === phone);
       items.forEach(({ name, option }) => {
         const cleanOption = (option || '').replace(/^[^:]+:/, '').trim();
         rows.push([
@@ -1612,8 +1947,8 @@ document.getElementById('csv-download-btn')?.addEventListener('click', async () 
           productCode,
           order?.receiver_name || customerInfo?.name || customerName,
           order?.receiver_cellphone || phone,
-          order?.receiver_zipcode || '',
-          order?.receiver_address || '',
+          order?.receiver_zipcode || customerInfo?.zipcode || '',
+          order?.receiver_address || customerInfo?.address || '',
           '50000',
           name,
           cleanOption,
