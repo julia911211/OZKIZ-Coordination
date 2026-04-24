@@ -703,64 +703,16 @@ body {
 .codi-preview-popup {
   position: absolute;
   z-index: 9999;
-  background: #ffffff;
+  background: transparent;
   border-radius: 14px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10);
-  padding: 14px 16px 18px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.10);
   pointer-events: none;
-  min-width: 200px;
-  max-width: 560px;
-}
-.codi-preview-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-.codi-preview-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.codi-preview-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  width: 80px;
-}
-.codi-preview-item img {
-  width: 80px;
-  height: 80px;
-  object-fit: cover;
-  border-radius: 10px;
-  border: 1px solid #f1f5f9;
-  background: #f8fafc;
-}
-.codi-preview-item span {
-  font-size: 10px;
-  color: #475569;
-  text-align: center;
-  line-height: 1.3;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  width: 80px;
+  line-height: 0;
 }
-.codi-preview-arrow {
-  position: absolute;
-  bottom: -8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-top: 8px solid #ffffff;
-  filter: drop-shadow(0 2px 2px rgba(0,0,0,0.08));
+.codi-preview-popup canvas {
+  display: block;
+  border-radius: 14px;
 }
 
 /* ── History Section ─────────────────────────────────────── */
