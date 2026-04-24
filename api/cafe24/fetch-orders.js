@@ -72,7 +72,10 @@ export default async function handler(req, res) {
     // 필요한 필드만 추출
     const result = orders.map(o => ({
       order_id: o.order_id,
+      subscription_id: o.subscription_id || '',
       member_id: o.member_id || '',
+      buyer_name: o.buyer_name || '',
+      buyer_cellphone: (o.buyer_cellphone || o.buyer_phone || '').replace(/[^0-9]/g, ''),
       receiver_name: o.receiver_name || o.billing_name || '',
       receiver_cellphone: (o.receiver_cellphone || o.receiver_phone || o.billing_cellphone || '').replace(/[^0-9]/g, ''),
       receiver_zipcode: o.receiver_zipcode || '',

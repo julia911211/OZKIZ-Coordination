@@ -9,6 +9,8 @@ export default function handler(req, res) {
   const scope = [
     'mall.read_customer',
     'mall.read_order',
+    'mall.read_community',
+    'mall.read_product',
   ].join(',');
 
   const authUrl =

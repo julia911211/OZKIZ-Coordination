@@ -150,79 +150,68 @@ export default async function handler(req, res) {
     // 2. 최근 60일 신청 내역 수집
     const shipments = await fetchRecentShipments(accessToken);
 
-    // 3. phone 기준으로 구독 상태 집계
-    //    한 phone에 여러 subscription이 있을 수 있음
-    //    → 하나라도 활성(terminated_date 없음)이면 활성으로 판단
-    const phoneStatusMap = {}; // phone → { isActive, subscriptionId, createdDate, shipment }
-
+    // 3. subscription_id 기준으로 구독 상태 집계 (reg_id 매칭용)
+    const subStatusMap = {}; // subscription_id → { isActive, createdDate, shipment, phone }
     for (const s of shipments) {
-      const phone = normalizePhone(s.buyer_cellphone || s.receiver_cellphone || '');
-      if (!phone) continue;
-
+      const subId = s.subscription_id || '';
+      if (!subId) continue;
       const isTerminated = !!s.terminated_date;
-      const createdDate = s.created_date || '';
-
-      if (!phoneStatusMap[phone]) {
-        phoneStatusMap[phone] = {
-          isActive: !isTerminated,
-          subscriptionId: s.subscription_id || '',
-          createdDate,
-          shipment: s,
-        };
+      const phone = normalizePhone(s.buyer_cellphone || s.receiver_cellphone || '');
+      if (!subStatusMap[subId]) {
+        subStatusMap[subId] = { isActive: !isTerminated, createdDate: s.created_date || '', shipment: s, phone };
       } else {
-        // 하나라도 활성이면 활성
-        if (!isTerminated) {
-          phoneStatusMap[phone].isActive = true;
-          phoneStatusMap[phone].shipment = s;
-        }
+        if (!isTerminated) subStatusMap[subId].isActive = true;
       }
     }
 
-    // 4. 기존 DB 고객 조회
+    // 4. 기존 DB 고객 조회 (id, reg_id, phone 포함)
     const { data: existingCustomers, error: custError } = await supabase
       .from('customers')
-      .select('id, phone, name');
+      .select('id, phone, name, reg_id');
     if (custError) throw new Error(`고객 목록 조회 실패: ${custError.message}`);
 
-    const existingPhoneSet = new Set(
-      (existingCustomers || []).map(c => normalizePhone(c.phone))
+    // 기존 reg_id 목록 (신규 등록 중복 방지용)
+    const existingRegIdSet = new Set(
+      (existingCustomers || []).map(c => c.reg_id).filter(Boolean)
     );
 
     // 5. 기존 고객 중 해지된 고객 삭제
-    const cancelledPhones = [];
+    //    - reg_id가 있는 고객: reg_id로 정확히 매칭 → 해지 시 해당 row만 삭제
+    //    - reg_id가 없는 고객 (수동 등록 등): 삭제 대상에서 제외 (안전하게 보존)
+    const cancelledDbIds = [];
+    const cancelledNames = [];
     for (const c of (existingCustomers || [])) {
-      const phone = normalizePhone(c.phone);
-      const status = phoneStatusMap[phone];
-      // 카페24에 데이터가 있고, 해지된 경우에만 삭제
+      if (!c.reg_id) continue; // reg_id 없으면 건드리지 않음
+      const status = subStatusMap[c.reg_id];
       if (status && !status.isActive) {
-        cancelledPhones.push(phone);
+        cancelledDbIds.push(c.id);
+        cancelledNames.push({ name: c.name, phone: normalizePhone(c.phone) });
       }
     }
 
     let deletedCount = 0;
-    if (cancelledPhones.length > 0) {
+    if (cancelledDbIds.length > 0) {
       const { error: delError } = await supabase
         .from('customers')
         .delete()
-        .in('phone', cancelledPhones);
+        .in('id', cancelledDbIds);
       if (delError) throw new Error(`해지 고객 삭제 실패: ${delError.message}`);
-      deletedCount = cancelledPhones.length;
-      // existingPhoneSet에서도 제거
-      cancelledPhones.forEach(p => existingPhoneSet.delete(p));
+      deletedCount = cancelledDbIds.length;
     }
 
-    // 6. 신규 고객 등록 (SYNC_CUTOFF_DATE 이후 신청 + DB에 없는 phone)
+    // 6. 신규 고객 등록 (SYNC_CUTOFF_DATE 이후 신청 + DB에 없는 reg_id)
     const newCustomers = [];
 
-    for (const [phone, status] of Object.entries(phoneStatusMap)) {
-      // DB에 이미 있거나, 해지된 신규는 스킵
-      if (existingPhoneSet.has(phone)) continue;
+    for (const [subId, status] of Object.entries(subStatusMap)) {
+      // 이미 DB에 있거나, 해지된 신규는 스킵
+      if (existingRegIdSet.has(subId)) continue;
       if (!status.isActive) continue;
       // 컷오프 날짜 이후 신청한 고객만
       if (!status.createdDate || status.createdDate < SYNC_CUTOFF_DATE) continue;
 
       const s = status.shipment;
       const name = s.buyer_name || s.receiver_name || '';
+      const phone = status.phone;
 
       // 옵션에서 성별/사이즈 추출
       const items = s.items || [];
@@ -237,12 +226,11 @@ export default async function handler(req, res) {
       }
 
       const payDay = extractPayDay(status.createdDate);
-
       const zipcode = s.receiver_zipcode || s.buyer_zipcode || null;
       const address = [s.receiver_address || s.buyer_address1 || '', s.receiver_address_detail || s.buyer_address2 || ''].filter(Boolean).join(' ') || null;
 
       newCustomers.push({
-        reg_id: status.subscriptionId,
+        reg_id: subId,
         name,
         phone,
         gender,
@@ -253,8 +241,9 @@ export default async function handler(req, res) {
         preference: '없음',
         zipcode,
         address,
+        member_id: s.member_id || null,
       });
-      existingPhoneSet.add(phone);
+      existingRegIdSet.add(subId); // 같은 배치에서 중복 방지
     }
 
     let addedCount = 0;
@@ -270,10 +259,7 @@ export default async function handler(req, res) {
       success: true,
       shipments_fetched: shipments.length,
       deleted_cancelled: deletedCount,
-      cancelled_customers: cancelledPhones.map(p => {
-        const c = (existingCustomers || []).find(x => normalizePhone(x.phone) === p);
-        return { name: c?.name || '', phone: p };
-      }),
+      cancelled_customers: cancelledNames,
       new_added: addedCount,
       new_customers: newCustomers.map(c => ({
         name: c.name, phone: c.phone, gender: c.gender,

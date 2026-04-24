@@ -81,7 +81,6 @@
                 <input type="date" id="date-to" style="border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:13px;color:#1e293b;outline:none;cursor:pointer;" />
                 <button id="show-all-btn" style="border:1px solid #e2e8f0;background:white;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;color:#64748b;cursor:pointer;white-space:nowrap;" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#64748b'">전체</button>
               </div>
-              <button id="run-btn" class="primary-btn">자동 코디 생성하기</button>
               <button id="csv-download-btn" style="background:#10b981;color:white;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(16,185,129,0.3);">⬇️ 발주 CSV</button>
             </div>
             <div class="right-uploads">
@@ -98,22 +97,37 @@
 
           <section id="results-container" class="results-grid">
             <div class="empty-state">
-              <p>'자동 코디 생성하기' 버튼을 눌러 업무를 시작하세요.</p>
+              <p>해당 날짜의 결제 고객이 없습니다.</p>
             </div>
           </section>
         </main>
 
         <!-- View 2: Customer List Table (Hidden by default) -->
         <main id="cust-list-view" class="tab-view">
+          <!-- 고객 통계 차트 -->
+          <div class="db-charts-row">
+            <div class="db-chart-card">
+              <div class="db-chart-title">성별 분포</div>
+              <canvas id="chart-gender"></canvas>
+            </div>
+            <div class="db-chart-card">
+              <div class="db-chart-title">의류 사이즈</div>
+              <canvas id="chart-cloth"></canvas>
+            </div>
+            <div class="db-chart-card">
+              <div class="db-chart-title">슈즈 사이즈</div>
+              <canvas id="chart-shoe"></canvas>
+            </div>
+          </div>
           <section class="table-container card-shadow">
             <div class="table-actions">
               <div class="table-filters">
-                <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
-                  <div class="search-input-group" style="display: flex; align-items: center; background: white; border: 2px solid var(--primary); border-radius: 12px; padding: 10px 16px; width: 420px; box-shadow: 0 4px 12px rgba(255,77,109,0.15);">
-                    <span style="margin-right: 10px; font-size: 16px;">🔍</span>
-                    <input type="text" id="customer-db-search" placeholder="이름, 연락처, 신청번호 검색..." style="border: none; outline: none; width: 100%; font-size: 15px; font-weight: 600; color: #1e293b; background: transparent;">
+                <div class="db-toolbar">
+                  <div class="db-search-wrap">
+                    <span class="db-search-icon">🔍</span>
+                    <input type="text" id="customer-db-search" class="db-search-input" placeholder="이름 · 연락처 · 신청번호">
                   </div>
-                  <button id="add-customer-btn" style="background:var(--primary);color:white;border:none;border-radius:12px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 4px 12px rgba(255,77,109,0.3);">+ 고객 추가</button>
+                  <button id="add-customer-btn" class="db-add-btn">+ 고객 추가</button>
                 </div>
               </div>
             </div>
