@@ -174,71 +174,19 @@ codiPreviewPopup.className = 'codi-preview-popup';
 codiPreviewPopup.style.display = 'none';
 document.body.appendChild(codiPreviewPopup);
 
-async function generateCodiCanvas(srcs) {
-  const W = 500, H = 280;
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
+const FLATLAY_ANGLES = [-7, 5, -4, 8, -3, 6, -5];
+const FLATLAY_OFFSETS = [-10, 12, -8, 14, -6, 10, -12];
 
-  // 크림 배경
-  const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#fdf8f2'); bg.addColorStop(1, '#f7f0e8');
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-
-  const n = srcs.length;
-  const SIZE = Math.max(90, Math.min(115, Math.floor((W - 60) / n - 8)));
-  const ANGLES = [-7, 5, -4, 8, -3, 6, -5];
-
-  // n개에 따른 배치 좌표
-  const makePositions = (count) => {
-    const spread = W - 80;
-    return Array.from({ length: count }, (_, i) => ({
-      x: 50 + (spread / Math.max(count - 1, 1)) * i,
-      y: H / 2 + (i % 2 === 0 ? -10 : 12),
-    }));
-  };
-  const positions = makePositions(n);
-
-  const loadImg = (src) => new Promise(resolve => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = src;
-  });
-
-  const imgs = await Promise.all(srcs.map(loadImg));
-
-  imgs.forEach((img, i) => {
-    if (!img) return;
-    const { x, y } = positions[i];
-    const rad = (ANGLES[i % ANGLES.length] * Math.PI) / 180;
-    const half = SIZE / 2;
-
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(rad);
-
-    // 그림자
-    ctx.shadowColor = 'rgba(0,0,0,0.20)';
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetX = 3;
-    ctx.shadowOffsetY = 6;
-
-    // 흰 폴라로이드 프레임
-    const ph = 7, pv = 7, pb = 24;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(-half - ph, -half - pv, SIZE + ph * 2, SIZE + pv + pb);
-
-    ctx.shadowColor = 'transparent';
-    ctx.beginPath();
-    ctx.rect(-half, -half, SIZE, SIZE);
-    ctx.clip();
-    ctx.drawImage(img, -half, -half, SIZE, SIZE);
-    ctx.restore();
-  });
-
-  return canvas;
+function buildFlatlay(srcs) {
+  const items = srcs.map((src, i) => {
+    const angle = FLATLAY_ANGLES[i % FLATLAY_ANGLES.length];
+    const offsetY = FLATLAY_OFFSETS[i % FLATLAY_OFFSETS.length];
+    return `
+      <div class="flatlay-card" style="transform: rotate(${angle}deg) translateY(${offsetY}px);">
+        <img src="${src}" onerror="this.closest('.flatlay-card').style.display='none'">
+      </div>`;
+  }).join('');
+  return `<div class="flatlay-wrap">${items}</div>`;
 }
 
 function positionPopup(triggerEl) {
@@ -253,21 +201,14 @@ function positionPopup(triggerEl) {
   codiPreviewPopup.style.top = top + 'px';
 }
 
-async function showCodiPreview(triggerEl, card) {
+function showCodiPreview(triggerEl, card) {
   const srcs = [...card.querySelectorAll('.card-right .item-thumb img')]
     .map(img => img.src)
     .filter(src => src && !src.includes('placehold'));
   if (srcs.length === 0) return;
 
-  codiPreviewPopup.innerHTML = '<div style="padding:24px 32px;color:#b0a090;font-size:13px;">코디 생성 중...</div>';
+  codiPreviewPopup.innerHTML = buildFlatlay(srcs);
   codiPreviewPopup.style.display = 'block';
-  positionPopup(triggerEl);
-
-  const canvas = await generateCodiCanvas(srcs);
-  canvas.style.borderRadius = '12px';
-  canvas.style.display = 'block';
-  codiPreviewPopup.innerHTML = '';
-  codiPreviewPopup.appendChild(canvas);
   positionPopup(triggerEl);
 }
 
